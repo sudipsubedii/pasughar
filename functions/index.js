@@ -507,7 +507,7 @@ exports.sendVetAppointmentReminders = onSchedule('every 15 minutes', async () =>
 
 
 function validateVetSlot(date, time) {
-  if (typeof date !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     throw new HttpsError('invalid-argument', 'Choose a valid appointment date.');
   }
   if (typeof time !== 'string' || !/^(?:09|1[0-6]):(?:00|30)$/.test(time)) {
