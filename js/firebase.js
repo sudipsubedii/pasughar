@@ -186,7 +186,11 @@ export async function saveCustomerProfile({displayName, phone}) {
   const name = String(displayName || '').trim();
   const contactPhone = String(phone || '').trim();
   if (!name || name.length > 100) throw new Error('Enter a name of 1 to 100 characters.');
-  if (contactPhone && !/^(?:\+977[- ]?)?(?:0)?9[6-8]\d{8}$/.test(contactPhone.replace(/[\s().-]/g,''))) throw new Error('Enter a valid Nepali mobile number, for example 98XXXXXXXX.');
+  if (contactPhone) {
+    const digits = contactPhone.replace(/\D/g, '');
+    const local = digits.startsWith('977') ? digits.slice(3) : digits.startsWith('0') ? digits.slice(1) : digits;
+    if (!/^9[6-8]\d{8}$/.test(local)) throw new Error('Enter a valid Nepali mobile number, for example 98XXXXXXXX.');
+  }
   await updateDoc(doc(db,'users',user.uid), {
     displayName:name, phone:contactPhone, updatedAt:serverTimestamp()
   });
