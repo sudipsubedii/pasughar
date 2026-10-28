@@ -191,7 +191,7 @@ function locationOptions(products,key) {
 function renderSearchTrends() {
   const terms=searchTrendTerms();
   if(terms.length)return '<section class="search-trends"><div class="container"><div class="search-trends-heading"><div><div class="eyebrow">Your discovery history</div><h2>Recent searches on this device</h2></div><span class="small-muted">Updates as you search</span></div><div class="search-trend-chips">'+terms.map(term=>'<button type="button" class="search-trend-chip" data-action="search-suggestion" data-query="'+safe(term)+'">'+safe(term)+' <span>↗</span></button>').join('')+'</div></div></section>';
-  const dynamic=CATEGORIES.filter(c=>activeProducts().some(p=>normalizeCategoryId(p.category)===c.id)).slice(0,5);
+  const dynamic=CATEGORIES.filter(c=>c.active!==false&&activeProducts().some(p=>normalizeCategoryId(p.category)===c.id)).slice(0,5);
   return '<section class="search-trends"><div class="container"><div class="search-trends-heading"><div><div class="eyebrow">Explore by category</div><h2>Start with a category</h2></div></div><div class="search-trend-chips">'+dynamic.map(c=>'<button type="button" class="search-trend-chip" data-action="search-suggestion" data-query="'+safe(c.name)+'">'+safe(c.name)+' <span>↗</span></button>').join('')+'</div></div></section>';
 }
 function renderSearchSuggestionItems(query) {
@@ -200,7 +200,7 @@ function renderSearchSuggestionItems(query) {
   const q=String(query||'').trim();
   if(q.length<1){host.hidden=true;host.innerHTML='';return;}
   const products=activeProducts().filter(p=>productMatchesQuery(p,q)).slice(0,5);
-  const categories=CATEGORIES.filter(c=>productMatchesQuery({name:c.name,description:c.description,retailer:'',location:'',category:c.id,attributes:{}},q)).slice(0,3);
+  const categories=CATEGORIES.filter(c=>c.active!==false&&productMatchesQuery({name:c.name,description:c.description,retailer:'',location:'',category:c.id,attributes:{}},q)).slice(0,3);
   const historyTerms=searchTrendTerms().filter(term=>normalizeSearchText(term).includes(normalizeSearchText(q))).slice(0,3);
   const list=[];
   historyTerms.forEach(term=>list.push({type:'Recent search',label:term,query:term}));
