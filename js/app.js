@@ -33,6 +33,7 @@ let catalogueLoaded = !isFirebaseConfigured();
 let authMode = 'signin';
 let authChannel = 'email';
 let authRole = 'customer';
+let authGateActive = false;
 let phoneDraft = '';
 let phoneOtpSent = false;
 let checkoutOtpSent = false;
@@ -299,6 +300,7 @@ function renderWishlist() {
   app.innerHTML=`<div class="page-wrap"><div class="container"><div class="page-title-row"><div><div class="eyebrow">Saved for later</div><h1>Your wishlist</h1><p>Keep the products you may want to order.</p></div></div>${products.length?`<div class="product-grid">${products.map(productCard).join('')}</div>`:emptyState('♡','No saved products yet','Tap the heart on any product to save it here.','#shop','Browse products')}</div></div>`;
 }
 function renderAuthPage(defaultRole = authRole) {
+  authGateActive = true;
   if (['customer','retailer'].includes(defaultRole)) authRole = defaultRole;
   const roleOptions = '<option value="customer" '+(authRole==='customer'?'selected':'')+'>Customer</option><option value="retailer" '+(authRole==='retailer'?'selected':'')+'>Retailer</option>';
   const channelTabs = '<div class="auth-channel-tabs"><button type="button" class="'+(authChannel==='email'?'active':'')+'" data-action="auth-channel" data-channel="email">Email and password</button><button type="button" class="'+(authChannel==='phone'?'active':'')+'" data-action="auth-channel" data-channel="phone">Phone OTP</button></div>';
@@ -315,6 +317,7 @@ function renderAuthPage(defaultRole = authRole) {
 function renderAccount() {
   const user = session();
   if (!user) { renderAuthPage('customer'); return; }
+  authGateActive = false;
   const verified = isVerifiedContact({emailVerified:user.emailVerified,phoneNumber:user.phoneNumber});
   const roleName = user.role==='admin'?'Administrator':user.role==='retailer'?'Retailer':'Customer';
   const destination = user.role==='admin'?'#admin':user.role==='retailer'?'#seller':'#shop';
@@ -394,7 +397,8 @@ function routeTitle(path, params) {
   return ({pets:'Pets & supplies',cart:'Shopping cart',wishlist:'Saved items',seller:'Retailer workspace',admin:'Admin dashboard',about:'About Pashughar',learn:'Learn',contact:'Contact',privacy:'Privacy policy',terms:'Terms & conditions'})[path] || 'Page not found';
 }
 function renderRouteChrome(path, params) {
-  if (path === 'home' || path === 'admin' || (path === 'seller' && session()?.role !== 'retailer')) return;
+  if (['home','admin','login','account','seller','pets','pet-section','about','learn','contact','privacy','terms'].includes(path)) return;
+  if (!['shop','cart','wishlist'].includes(path) && !path.startsWith('product/')) return;
   const title = routeTitle(path, params);
   let parent = '<a href="#home">Home</a>';
   if (path.startsWith('product/')) {
@@ -623,7 +627,7 @@ document.addEventListener('click',e=>{
     else navigate(fallbackBackRoute(getRoute().path));
   }
   else if(action==='auth-mode'){authMode=actionEl.dataset.mode==='signup'?'signup':'signin';phoneOtpSent=false;renderAuthPage(authRole);}
-  else if(action==='auth-channel'){authChannel=actionEl.dataset.channel==='phone'?'phone':'email';renderAuthPage(authRole);}
+  else if(action==='auth-channel'){authChannel=actionEl.dataset.channel==='phone'?'phone':'email';phoneOtpSent=false;renderAuthPage(authRole);}
   else if(action==='auth-google'){
     if(!isFirebaseConfigured())return showToast('Firebase is not configured.','error');
     const selectedRole=document.getElementById('auth-role')?.value||authRole;
@@ -908,7 +912,8 @@ if(isFirebaseConfigured()) {
     firebaseSession = next;
     if(next)resetAutoLogoutTimer();else clearTimeout(inactivityTimer);
     if (next && next.role === 'admin' && getRoute().path !== 'admin') { navigate('#admin'); return; }
-    if(next && ['login','seller'].includes(getRoute().path)){
+    if(next && (['login','seller'].includes(getRoute().path)||authGateActive)){
+      authGateActive=false;
       if(next.role==='retailer')navigate('#seller');
       else if(next.role==='customer')navigate('#shop');
       else navigate('#admin');
