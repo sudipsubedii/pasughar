@@ -125,6 +125,7 @@ exports.createOrder = onCall(async (request) => {
       shipping: {name: asText(shipping.name, 120), phone: asText(shipping.phone, 40), address: asText(shipping.address, 300), city: asText(shipping.city, 100), email: asText(shipping.email || (auth && auth.token.email) || '', 254)},
       notes: asText(shipping.notes, 800),
       items: resolvedItems,
+      productIds: resolvedItems.map(item => item.productId),
       subtotal: total,
       total,
       currency: 'NPR',
