@@ -158,6 +158,27 @@ export async function updateRetailerOrderStatusDirect({retailerOrderId,status}) 
   await updateDoc(ref,{status,statusUpdatedBy:user.uid,updatedAt:serverTimestamp()});
   return {retailerOrderId,status};
 }
+export async function getPublishedProductReviews(productId) {
+  if(!productId) return [];
+  const snapshot=await getDocs(query(collection(db,'reviews'),where('productId','==',productId),where('status','==','published')));
+  return snapshot.docs.map(item=>({id:item.id,...toPlain(item.data())})).sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+}
+export async function submitProductReview({productId,orderId,rating,body}) {
+  const user=auth.currentUser;
+  if(!user) throw new Error('Sign in with the account used for the purchase to leave a review.');
+  if(!(user.emailVerified || user.phoneNumber)) throw new Error('Verify your email or phone before reviewing.');
+  const score=Number(rating),text=String(body||'').trim(),purchase=String(orderId||'').trim();
+  if(!productId||!purchase||!Number.isInteger(score)||score<1||score>5||text.length<10||text.length>1500) throw new Error('Enter the order ID, a rating from 1 to 5, and a review of 10 to 1,500 characters.');
+  // Deterministic ID prevents the same buyer reviewing the same product/order twice.
+  const reviewId=purchase+'_'+productId;
+  const ref=doc(db,'reviews',reviewId);
+  await setDoc(ref,{
+    productId,orderId:purchase,customerId:user.uid,
+    customerName:String(user.displayName||user.email?.split('@')[0]||'Verified buyer').slice(0,80),
+    rating:score,body:text,status:'published',createdAt:serverTimestamp()
+  });
+  return {id:reviewId};
+}
 export async function getPublicStoreProfile(storeId) {
   if (!storeId) throw new Error('Store ID is missing.');
   const snap = await getDoc(doc(db,'publicStores',storeId));
