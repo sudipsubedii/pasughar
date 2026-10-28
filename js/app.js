@@ -1,4 +1,5 @@
 import {store, CATEGORIES, money, categoryName, normalizeCategoryId, slugId, safe, hydrateCollection} from './store.js';
+import {renderCustomerFeature, installCustomerFeatureHandlers, toggleCloudWishlist} from './customer-features.js';
 import {isFirebaseConfigured, signInGoogle, signInEmail, createEmailAccount, resetEmailPassword, signOutUser, sendVerificationEmail, refreshAuthUser, sendPhoneOtp, confirmPhoneOtp, isVerifiedContact, setRememberMe, startFirebaseBridge, getCallable, moderateRetailerDirect, moderateProductDirect, removeProductDirect, createBreedingBooking, updateBreedingBookingStatus, createProductEnquiry, replyToEnquiry, getPublicStoreProfile, updateRetailerOrderStatusDirect, getPublishedProductReviews, submitProductReview} from './firebase.js';
 
 store.init();
@@ -628,7 +629,7 @@ function renderAccount() {
   const verifyBlock = verified
     ? '<div class="notice notice-info"><strong>Contact verified.</strong> You can continue using your account.</div>'
     : '<div class="notice notice-warn"><strong>Contact verification needed.</strong> Verify your email or use phone OTP before publishing listings or placing an account-based order.</div>'+(user.email?'<button class="button button-primary" type="button" data-action="send-email-verification">Send verification email</button> ':'')+'<button class="button button-secondary" type="button" data-action="refresh-verification">I have verified — refresh status</button>';
-  app.innerHTML = '<div class="page-wrap"><div class="container"><div class="account-page-card"><a class="button button-secondary" href="#home">← Back to shopping</a><div class="eyebrow">My Pashughar</div><h1>My Account</h1><p class="account-user-name">'+safe(user.name||'Pashughar user')+'</p><p class="small-muted">'+safe(user.email||user.phoneNumber||'')+' · '+roleName+'</p>'+verifyBlock+'<div class="account-actions"><a class="button button-primary" href="'+destination+'">'+(user.role==='admin'?'Open admin dashboard':user.role==='retailer'?'Open retailer dashboard':'Continue shopping')+' →</a><button class="button button-secondary" type="button" data-action="signout">Sign out</button></div><p class="small-muted">Remember me is controlled when you sign in. Unchecked sessions end when the browser session closes. Inactive sessions are signed out automatically.</p></div></div></div>';
+  app.innerHTML = '<div class="page-wrap"><div class="container"><div class="account-page-card"><a class="button button-secondary" href="#home">← Back to shopping</a><div class="eyebrow">My Pashughar</div><h1>My Account</h1><p class="account-user-name">'+safe(user.name||'Pashughar user')+'</p><p class="small-muted">'+safe(user.email||user.phoneNumber||'')+' · '+roleName+'</p>'+verifyBlock+'<div class="account-actions"><a class="button button-primary" href="'+destination+'">'+(user.role==='admin'?'Open admin dashboard':user.role==='retailer'?'Open retailer dashboard':'Continue shopping')+' →</a><a class="button button-secondary" href="#profile">Edit profile</a><a class="button button-secondary" href="#orders">My orders</a><a class="button button-secondary" href="#enquiries">My enquiries</a><a class="button button-secondary" href="#notifications">Notifications</a><a class="button button-secondary" href="#appointments">Vet appointments</a><button class="button button-secondary" type="button" data-action="signout">Sign out</button></div><p class="small-muted">Remember me is controlled when you sign in. Unchecked sessions end when the browser session closes. Inactive sessions are signed out automatically.</p></div></div></div>';
 }
 function resetAutoLogoutTimer() {
   clearTimeout(inactivityTimer);
@@ -733,7 +734,7 @@ function render() {
   const {path,params}=getRoute();
   delete app.dataset.sectionTheme;
   document.querySelectorAll('.nav-inner a').forEach(a=>a.classList.toggle('current',a.getAttribute('href')===`#${path}`));
-  const known = ['home','shop','pets','pet-section','cart','account','login','seller','admin','wishlist','about','learn','contact','privacy','terms'];
+  const known = ['home','shop','pets','pet-section','cart','account','login','seller','admin','wishlist','orders','enquiries','profile','notifications','appointments','about','learn','contact','privacy','terms'];
   if(path==='home')renderHome();
   else if(path==='login')renderAuthPage('customer');
   else if(path==='shop') { activeShopQuery=params.get('q')??''; activeShopCategory=params.get('category')??''; renderShop(params); }
@@ -745,7 +746,7 @@ function render() {
   else if(path==='account')renderAccount();
   else if(path==='seller') { if(session()?.role==='retailer')renderSellerDashboard(); else renderAuthPage('retailer'); }
   else if(path==='admin') { if(session()?.role==='admin')renderAdmin(); else renderAdminLogin(); }
-  else if(path==='wishlist')renderWishlist();
+  else if(['wishlist','orders','enquiries','profile','notifications','appointments'].includes(path)) { renderCustomerFeature(path,app).then(handled=>{ if(!handled) renderSimplePage(path); }).catch(()=>renderSimplePage(path)); }
   else if(known.includes(path))renderSimplePage(path);
   else renderSimplePage('not-found');
   renderRouteChrome(path,params);
@@ -954,6 +955,7 @@ function endDemoSession() {
 }
 
 // Shared event delegation keeps page templates simple.
+installCustomerFeatureHandlers();
 document.addEventListener('click',e=>{
   const actionEl=e.target.closest('[data-action]');
   if(!actionEl)return;
