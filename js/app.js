@@ -1135,6 +1135,9 @@ document.addEventListener('keydown', e => {
     const first=document.querySelector('#search-suggestions .search-suggestion-item');
     if(first){e.preventDefault();first.focus();}
   }
+  if(e.target.matches('.detail-image[data-action="zoom-product-image"]')&&(e.key==='Enter'||e.key===' ')){
+    e.preventDefault();e.target.click();
+  }
 });
 document.addEventListener('change',async e=>{
   const el=e.target;
