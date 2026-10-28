@@ -1233,6 +1233,12 @@ document.addEventListener('click',e=>{
     else {const temp=document.createElement('textarea');temp.value=url;temp.style.position='fixed';temp.style.opacity='0';document.body.append(temp);temp.select();const ok=document.execCommand('copy');temp.remove();showToast(ok?'Product link copied.':'Copy the URL from the address bar.',ok?'':'warn');}
   }
   else if(action==='enquire-product'){openEnquiryForm(id);}
+  else if(action==='download-order-invoice'){const orderId=actionEl.dataset.orderId;const order=store.orders().find(o=>(o.orderId||o.id)===orderId)||lastCompletedOrder;downloadOrderInvoice(order);}
+  else if(action==='book-vet-appointment'){openVetAppointmentForm(actionEl.dataset.storeId);}
+  else if(action==='cancel-vet-appointment'){const appointment=store.vetAppointments().find(a=>a.id===id);if(!appointment)return showToast('Appointment not found.','warn');if(!confirm('Cancel this veterinary appointment?'))return;manageVetAppointment({appointmentId:id,action:'cancel'}).then(()=>{showToast('Appointment cancelled.');renderCustomerAppointments();}).catch(error=>showToast(firebaseErrorMessage(error),'error'));}
+  else if(action==='reschedule-vet-appointment'){openVetRescheduleForm(id);}
+  else if(action==='mark-notification-read'){const notifications=store.notifications().map(n=>n.id===id?{...n,read:true}:n);store.saveNotifications(notifications);markCustomerNotificationRead(id).then(()=>renderCustomerNotifications()).catch(error=>showToast(firebaseErrorMessage(error),'error'));}
+  else if(action==='open-notification'){const target=actionEl.dataset.target||'#notifications';const nId=actionEl.dataset.notificationId;if(nId){store.saveNotifications(store.notifications().map(n=>n.id===nId?{...n,read:true}:n));markCustomerNotificationRead(nId).catch(()=>{});}navigate(target);}
   else if(action==='retry-store'){renderPublicStore(id);}
   else if(action==='book-breeding'){openBreedingBookingForm(id);}
   else if(action==='edit-shop-registration'){const user=session();if(user)renderSellerSetup(user);}
@@ -1374,6 +1380,19 @@ document.addEventListener('submit',e=>{
   } else if(form.classList.contains('enquiry-reply-form')){
     e.preventDefault();const fd=new FormData(form);const submit=form.querySelector('button[type="submit"]');if(submit)submit.disabled=true;
     replyToEnquiry(form.dataset.enquiryId,String(fd.get('reply')||'')).then(()=>{showToast('Reply sent to customer.');renderSellerDashboard();}).catch(error=>{if(submit)submit.disabled=false;showToast(firebaseErrorMessage(error),'error');});
+  } else if(form.classList.contains('customer-message-form')){
+    e.preventDefault();const fd=new FormData(form);const body=String(fd.get('message')||'').trim();const button=form.querySelector('button[type="submit"]');if(!body||body.length<2)return showToast('Write a message of at least two characters.','warn');if(button){button.disabled=true;button.textContent='Sending…';}
+    sendEnquiryMessage(form.dataset.enquiryId,body,'customer').then(()=>{form.reset();showToast('Message sent to the retailer.');renderCustomerEnquiries();}).catch(error=>{if(button){button.disabled=false;button.textContent='Send message';}showToast(firebaseErrorMessage(error),'error');});
+  } else if(form.id==='customer-profile-form'){
+    e.preventDefault();if(customerProfileSaving)return;const fd=new FormData(form);const displayName=String(fd.get('displayName')||'').trim();const phone=String(fd.get('phone')||'').trim();const button=form.querySelector('button[type="submit"]');if(!displayName)return showToast('Enter your name.','warn');customerProfileSaving=true;if(button){button.disabled=true;button.textContent='Saving profile…';}
+    if(!isFirebaseConfigured()){const user=session();store.saveSession({...user,name:displayName,profilePhone:phone});customerProfileSaving=false;showToast('Profile saved in this browser.');renderAccount();return;}
+    saveCustomerProfile({displayName,phone}).then(()=>{firebaseSession={...firebaseSession,name:displayName,profilePhone:phone};showToast('Profile updated.');}).catch(error=>showToast(firebaseErrorMessage(error),'error')).finally(()=>{customerProfileSaving=false;renderAccount();});
+  } else if(form.id==='vet-booking-form'){
+    e.preventDefault();const fd=new FormData(form);const button=form.querySelector('button[type="submit"]');if(button){button.disabled=true;button.textContent='Booking…';}
+    createVetAppointment({storeId:form.dataset.storeId,appointmentDate:String(fd.get('appointmentDate')||''),slot:String(fd.get('slot')||''),customerName:String(fd.get('customerName')||''),customerPhone:String(fd.get('customerPhone')||''),petName:String(fd.get('petName')||''),reason:String(fd.get('reason')||'')}).then(result=>{closeModal();showToast('Veterinary appointment confirmed for '+result.appointmentDate+' at '+result.slot+'.');navigate('#appointments');}).catch(error=>{if(button){button.disabled=false;button.textContent='Confirm appointment →';}showToast(firebaseErrorMessage(error),'error');});
+  } else if(form.id==='vet-reschedule-form'){
+    e.preventDefault();const fd=new FormData(form);const button=form.querySelector('button[type="submit"]');if(button){button.disabled=true;button.textContent='Rescheduling…';}
+    manageVetAppointment({appointmentId:form.dataset.appointmentId,action:'reschedule',appointmentDate:String(fd.get('appointmentDate')||''),slot:String(fd.get('slot')||'')}).then(result=>{closeModal();showToast('Appointment rescheduled to '+result.appointmentDate+' at '+result.slot+'.');renderCustomerAppointments();}).catch(error=>{if(button){button.disabled=false;button.textContent='Confirm new time';}showToast(firebaseErrorMessage(error),'error');});
   } else if(form.id==='bulk-price-form'){
     e.preventDefault();const fd=new FormData(form);const scope=String(fd.get('scope')||'all');const mode=String(fd.get('mode')||'set');const value=Number(fd.get('value'));
     const user=session();const list=allProducts();const own=list.filter(p=>(p.retailerId===user?.uid||(user?.uid==='demo-retailer'&&p.retailerId==='retailer-demo'))&&(scope==='all'||normalizeCategoryId(p.category)===scope));
