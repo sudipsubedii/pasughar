@@ -1,5 +1,6 @@
 import {store, CATEGORIES, money, categoryName, normalizeCategoryId, slugId, safe, hydrateCollection} from './store.js';
 import {renderCustomerFeature, installCustomerFeatureHandlers, toggleCloudWishlist, watchChatThreads} from './customer-features.js';
+import {renderAdminFeature, installAdminFeatureHandlers, renderAdminProductForm, saveAdminProductFromForm} from './admin-features.js';
 import {isFirebaseConfigured, signInGoogle, signInEmail, createEmailAccount, resetEmailPassword, signOutUser, sendVerificationEmail, refreshAuthUser, sendPhoneOtp, confirmPhoneOtp, isVerifiedContact, setRememberMe, startFirebaseBridge, getCallable, moderateRetailerDirect, moderateProductDirect, removeProductDirect, createBreedingBooking, updateBreedingBookingStatus, createProductEnquiry, replyToEnquiry, getPublicStoreProfile, updateRetailerOrderStatusDirect, getPublishedProductReviews, submitProductReview} from './firebase.js';
 
 store.init();
@@ -37,7 +38,7 @@ let locationPermissionRequested = false;
 const SEARCH_HISTORY_KEY = 'pashughar.searchHistory.v1';
 let activeShopFiltersVisible = false;
 let sellerTab = 'products';
-let adminTab = 'products';
+let adminTab = 'overview';
 let currentProductImageUrl = '';
 let currentProductImages = [];
 let activeProductImageIndex = 0;
@@ -248,7 +249,7 @@ const productCard = p => {
 const productSkeletons = (count = 4) => '<div class="product-grid product-grid--skeleton" aria-label="Loading product listings">'+Array.from({length:count},()=>'<article class="skeleton-product"><div class="skeleton-block skeleton-product-image"></div><div class="skeleton-product-copy"><div class="skeleton-block skeleton-line"></div><div class="skeleton-block skeleton-title"></div><div class="skeleton-block skeleton-line short"></div><div class="skeleton-block skeleton-price"></div></div></article>').join('')+'</div>';
 const sectionHeading = (eyebrow, title, desc = '', action = '') => `<div class="section-head"><div><div class="eyebrow">${eyebrow}</div><h2>${title}</h2>${desc?`<p>${desc}</p>`:''}</div>${action?`<a href="#shop" class="section-link">${action} →</a>`:''}</div>`;
 const emptyState = (icon, title, desc, href = '#shop', label = 'Explore products') => `<div class="empty-state"><div class="empty-state-icon">${icon}</div><h2>${title}</h2><p>${desc}</p><a class="button button-primary" href="${href}">${label}</a></div>`;
-const demoNotice = () => isFirebaseConfigured() ? `<div class="notice notice-info"><strong>Firebase mode:</strong> Catalogue and retailer records sync with Firestore. Product images must use public HTTPS image URLs because Firebase Storage is intentionally disabled. Guest checkout and reports require the included Cloud Functions to be deployed.</div>` : `<div class="notice notice-warn"><strong>Prototype mode:</strong> Records in this ZIP are saved in this browser only. Connect Firebase before a public launch.</div>`;
+const demoNotice = () => isFirebaseConfigured() ? (catalogueLoaded ? '' : `<div class="notice notice-info"><strong>Connecting to live data…</strong> The public catalogue is loading from Firestore.</div>`) : `<div class="notice notice-warn"><strong>Prototype mode:</strong> Records in this browser only. Connect Firebase before a public launch.</div>`;
 const retailerProfile = user => store.retailers().find(r => r.ownerId === user?.uid || (user?.email && r.email?.toLowerCase() === user.email.toLowerCase())) || null;
 const isVerifiedRetailer = user => Boolean(retailerProfile(user) && retailerProfile(user).status === 'approved');
 const openReportCount = retailerId => store.reports().filter(r => r.retailerId === retailerId && ['open','reviewing'].includes(r.status)).length;
@@ -318,8 +319,8 @@ function renderHome() {
   const products = activeProducts();
   const featured = products.slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).slice(0,4);
   app.innerHTML = `
-    <section class="hero"><div class="container hero-grid"><div class="hero-copy"><div class="eyebrow">One marketplace. Every animal need.</div><h1>Everything for animals, <em>all in one place.</em></h1><p>Discover livestock, fresh meat, pets, pet essentials and animal products from retailers in one convenient marketplace.</p><div class="hero-actions"><a href="#shop" class="button button-primary">Explore marketplace <span>→</span></a><a href="#seller" class="button button-secondary">Become a retailer</a></div><div class="hero-proof"><span class="proof-point"><span class="proof-check">✓</span> Local retailers</span><span class="proof-point"><span class="proof-check">✓</span> Clear stock status</span><span class="proof-point"><span class="proof-check">✓</span> One easy marketplace</span></div></div>
-    <div class="hero-visual"><img src="https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1200&q=85" alt="Green farmland and agricultural fields" fetchpriority="high"><div class="hero-sticker"><strong>All together.</strong><span>From farm essentials to pet favourites.</span></div><div class="hero-image-label"><span>Welcome to Pashughar</span><h2>Closer to the things you care for.</h2><p>Shop from a growing community of animal and farm retailers.</p></div></div></div></section>
+    <section class="hero"><div class="container hero-grid"><div class="hero-copy"><div class="eyebrow">One marketplace. Every animal need.</div><h1>${safe(store.siteSettings().bannerTitle || 'Everything for animals, all in one place.')}</h1><p>${safe(store.siteSettings().bannerText || 'Discover livestock, fresh meat, pets, pet essentials and animal products from retailers in one convenient marketplace.')}</p><div class="hero-actions"><a href="#shop" class="button button-primary">Explore marketplace <span>→</span></a><a href="#seller" class="button button-secondary">Become a retailer</a></div><div class="hero-proof"><span class="proof-point"><span class="proof-check">✓</span> Local retailers</span><span class="proof-point"><span class="proof-check">✓</span> Clear stock status</span><span class="proof-point"><span class="proof-check">✓</span> One easy marketplace</span></div></div>
+    <div class="hero-visual"><img src="${safe(store.siteSettings().bannerImage || "https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1200&q=85")}" alt="Pashughar homepage banner" fetchpriority="high"><div class="hero-sticker"><strong>All together.</strong><span>From farm essentials to pet favourites.</span></div><div class="hero-image-label"><span>Welcome to Pashughar</span><h2>Closer to the things you care for.</h2><p>Shop from a growing community of animal and farm retailers.</p></div></div></div></section>
     <section class="category-section"><div class="container">${sectionHeading('Browse the marketplace','What are you looking for?','Choose a category to start.')}</div><div class="container category-grid">${CATEGORIES.map(c=>`<a class="category-card category-card--${c.id}" href="${c.id==='pets-supplies'?'#pets':'#shop?category='+c.id}" style="--category-accent:${c.palette.accent};--category-deep:${c.palette.deep};--category-wash:${c.palette.wash}"><img class="category-photo" src="${safe(c.image)}" alt="" loading="lazy"><span class="category-card-copy"><span class="category-kicker">${safe(c.kicker)}</span><h3>${safe(c.name)}</h3><p>${safe(c.cardDescription)}</p><span class="category-card-link">Explore category <span aria-hidden="true">↗</span></span></span></a>`).join('')}</div></section>
     <section class="products-section"><div class="container">${sectionHeading('Picked for you','Recently added','New listings from participating retailers.','View all products')}<div class="product-grid">${featured.map(productCard).join('')}</div>${featured.length===0?(catalogueLoaded?emptyState('⌕','No products yet','Approved product listings will appear here.','#seller','Join as a retailer'):productSkeletons()):''}</div></section>
     ${renderSearchTrends()}<section class="trust-strip"><div class="container trust-grid"><div class="trust-item"><div class="trust-icon">♧</div><div><strong>A wider choice</strong><span>Products from multiple retailers</span></div></div><div class="trust-item"><div class="trust-icon">✓</div><div><strong>Clear availability</strong><span>Know what is in stock before ordering</span></div></div><div class="trust-item"><div class="trust-icon">⌖</div><div><strong>Local marketplace</strong><span>Discover sellers around Nepal</span></div></div><div class="trust-item"><div class="trust-icon">♡</div><div><strong>Animal needs, together</strong><span>From livestock to everyday pet care</span></div></div></div></section>
@@ -440,7 +441,8 @@ function renderProduct(id) {
 }
 function cartTotals(cart) {
   const subtotal = cart.reduce((sum, item)=>{const p=getProduct(item.id);return sum+(p?Number(p.price)*Number(item.qty):0)},0);
-  return {subtotal,delivery:0,total:subtotal};
+  const delivery = subtotal > 0 ? Math.max(0,Number(store.siteSettings().deliveryCharge)||0) : 0;
+  return {subtotal,delivery,total:subtotal+delivery};
 }
 function renderCart() {
   const cart = store.cart().filter(i=>getProduct(i.id));
