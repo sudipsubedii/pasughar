@@ -730,7 +730,7 @@ function renderCustomerOrders() {
     app.innerHTML='<div class="page-wrap"><div class="container"><div class="page-title-row"><div><div class="eyebrow">Your purchases</div><h1>My orders</h1><p>Track orders and review receipts from your Pashughar account.</p></div></div>'+emptyState('▤','No orders yet','When you place an order, its status and items will appear here.','#shop','Explore products')+'</div></div>';
     return;
   }
-  const stageIndex=status=>({Pending:0,Confirmed:1,Processing:1,Shipped:2,'Out for delivery':2,Delivered:3}[status]??-1);
+  const stageIndex=status=>({Pending:0,Confirmed:1,'Partially fulfilled':1,Processing:1,Shipped:2,'Out for delivery':2,Delivered:3}[status]??-1);
   const cards=orders.slice().sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0)).map(order=>{
     const orderId=order.orderId||order.id;
     const status=String(order.status||'Pending');
