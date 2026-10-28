@@ -5,9 +5,10 @@
  */
 import { initializeApp, getApps } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js';
 import {
-  getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup,
-  signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut,
-  sendPasswordResetEmail, getIdTokenResult
+  getAuth, GoogleAuthProvider, RecaptchaVerifier, onAuthStateChanged, signInWithPopup,
+  signInWithPhoneNumber, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut,
+  sendPasswordResetEmail, sendEmailVerification, getIdTokenResult, setPersistence,
+  browserLocalPersistence, browserSessionPersistence, reload
 } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-auth.js';
 import {
   getFirestore, collection, doc, getDoc, onSnapshot, query, where, addDoc,
@@ -39,10 +40,94 @@ export const functions = getFunctions(firebaseApp, 'asia-south2');
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-export const signInGoogle = () => signInWithPopup(auth, googleProvider);
-export const signInEmail = (email, password) => signInWithEmailAndPassword(auth, email.trim(), password);
-export const createEmailAccount = (email, password) => createUserWithEmailAndPassword(auth, email.trim(), password);
+let phoneVerifier = null;
+let phoneConfirmationResult = null;
+
+export async function setRememberMe(rememberMe = true) {
+  await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+}
+async function ensureUserProfile(user, requestedRole = 'customer') {
+  const profileRef = doc(db, 'users', user.uid);
+  const profileSnap = await getDoc(profileRef);
+  if (profileSnap.exists()) return profileSnap.data();
+  const retailerSnap = await getDoc(doc(db, 'retailers', user.uid));
+  const role = retailerSnap.exists() ? 'retailer' : (requestedRole === 'retailer' ? 'retailer' : 'customer');
+  const profile = {
+    displayName: user.displayName || '',
+    email: user.email || '',
+    phone: user.phoneNumber || '',
+    createdAt: serverTimestamp(),
+    role
+  };
+  await setDoc(profileRef, profile);
+  return profile;
+}
+export const signInGoogle = async (role = 'customer', rememberMe = true) => {
+  await setRememberMe(rememberMe);
+  const credential = await signInWithPopup(auth, googleProvider);
+  await ensureUserProfile(credential.user, role);
+  return credential;
+};
+export const signInEmail = async (email, password, role = 'customer', rememberMe = true) => {
+  await setRememberMe(rememberMe);
+  const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
+  await ensureUserProfile(credential.user, role);
+  return credential;
+};
+export const createEmailAccount = async (email, password, role = 'customer', rememberMe = true) => {
+  if (!['customer','retailer'].includes(role)) throw new Error('Choose customer or retailer for sign-up.');
+  await setRememberMe(rememberMe);
+  const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
+  await ensureUserProfile(credential.user, role);
+  await sendEmailVerification(credential.user);
+  return credential;
+};
 export const resetEmailPassword = email => sendPasswordResetEmail(auth, email.trim());
+export const sendVerificationEmail = async () => {
+  if (!auth.currentUser) throw new Error('Sign in first to verify your email.');
+  if (!auth.currentUser.email) throw new Error('This account has no email address to verify.');
+  if (auth.currentUser.emailVerified) return false;
+  await sendEmailVerification(auth.currentUser);
+  return true;
+};
+export const refreshAuthUser = async () => {
+  if (!auth.currentUser) return null;
+  await reload(auth.currentUser);
+  return auth.currentUser;
+};
+function normalizePhoneNumber(value) {
+  let phone = String(value || '').trim().replace(/[\\s().-]/g, '');
+  if (/^0[0-9]{9,10}$/.test(phone)) phone = '+977' + phone.slice(1);
+  else if (/^9[0-9]{9}$/.test(phone)) phone = '+977' + phone;
+  else if (/^977[0-9]{9,10}$/.test(phone)) phone = '+' + phone;
+  else if (!phone.startsWith('+')) phone = '+' + phone;
+  if (!/^\\+[1-9][0-9]{7,14}$/.test(phone)) throw new Error('Enter a valid phone number with country code, for example +97798XXXXXXXX.');
+  return phone;
+}
+export async function sendPhoneOtp(phone, role = 'customer', rememberMe = true) {
+  if (!['customer','retailer'].includes(role)) throw new Error('Choose customer or retailer for sign-in.');
+  await setRememberMe(rememberMe);
+  const normalized = normalizePhoneNumber(phone);
+  if (!phoneVerifier) phoneVerifier = new RecaptchaVerifier(auth, 'phone-recaptcha-container', {size:'invisible'});
+  try {
+    phoneConfirmationResult = await signInWithPhoneNumber(auth, normalized, phoneVerifier);
+    return true;
+  } catch (error) {
+    try { await phoneVerifier.clear(); } catch {}
+    phoneVerifier = null;
+    phoneConfirmationResult = null;
+    throw error;
+  }
+}
+export async function confirmPhoneOtp(code, role = 'customer') {
+  if (!phoneConfirmationResult) throw new Error('Send a verification code to your phone first.');
+  const confirmation = await phoneConfirmationResult.confirm(String(code || '').trim());
+  phoneConfirmationResult = null;
+  if (phoneVerifier) { try { await phoneVerifier.clear(); } catch {} phoneVerifier = null; }
+  await ensureUserProfile(confirmation.user, role);
+  return confirmation;
+}
+export const isVerifiedContact = user => Boolean(user && (user.emailVerified === true || (typeof user.phoneNumber === 'string' && user.phoneNumber.length > 0)));
 export const signOutUser = () => signOut(auth);
 export const getCallable = name => httpsCallable(functions, name);
 export async function updateBreedingBookingStatus(bookingId, status) {
@@ -304,16 +389,39 @@ export function startFirebaseBridge({ onSessionChanged }) {
       return;
     }
     let claims = {};
-    try { claims = await getRoleClaims(user); }
-    catch (error) { fireError(error); }
+    let profileData = {};
+    let retailerExists = false;
+    try {
+      claims = await getRoleClaims(user);
+      const [profileSnap, retailerSnap] = await Promise.all([
+        getDoc(doc(db, 'users', user.uid)),
+        getDoc(doc(db, 'retailers', user.uid))
+      ]);
+      if (profileSnap.exists()) profileData = profileSnap.data() || {};
+      retailerExists = retailerSnap.exists();
+      if (!profileSnap.exists()) {
+        const role = retailerExists ? 'retailer' : 'customer';
+        await setDoc(doc(db, 'users', user.uid), {
+          displayName: user.displayName || '',
+          email: user.email || '',
+          phone: user.phoneNumber || '',
+          createdAt: serverTimestamp(),
+          role
+        });
+        profileData = {role};
+      }
+    } catch (error) { fireError(error); }
     if (run !== authRun) return;
     const isAdmin = claims.admin === true;
+    const userRole = profileData.role === 'retailer' || retailerExists ? 'retailer' : 'customer';
     const session = {
       uid: user.uid,
-      name: user.displayName || user.email?.split('@')[0] || 'Retailer',
+      name: user.displayName || user.email?.split('@')[0] || user.phoneNumber || 'Customer',
       email: user.email || '',
       photoURL: user.photoURL || '',
-      role: isAdmin ? 'admin' : 'retailer',
+      phoneNumber: user.phoneNumber || '',
+      emailVerified: Boolean(user.emailVerified),
+      role: isAdmin ? 'admin' : userRole,
       firebase: true
     };
     onSessionChanged(session);
@@ -322,7 +430,7 @@ export function startFirebaseBridge({ onSessionChanged }) {
       return;
     }
     startPublicData();
-    startRetailerData(user.uid);
+    if (session.role === 'retailer') startRetailerData(user.uid);
   });
   return () => { stopDataListeners(); unsubscribeAuth(); };
 }
