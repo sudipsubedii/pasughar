@@ -227,9 +227,11 @@ service cloud.firestore {
         && request.resource.data.status == 'published'
         && exists(/databases/$(database)/documents/orders/$(request.resource.data.orderId))
         && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.customerId == request.auth.uid
-        && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.status == 'Delivered'
         && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.productIds is list
-        && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.productIds.hasAny([request.resource.data.productId]);
+        && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.productIds.hasAny([request.resource.data.productId])
+        && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.deliveredProductIds is list
+        && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.deliveredProductIds.hasAny([request.resource.data.productId])
+        && request.resource.data.createdAt is timestamp;
       allow update, delete: if isAdmin();
     }
     match /wishlists/{userId} { allow read, write: if isOwner(userId); }
