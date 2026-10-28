@@ -15,7 +15,7 @@ import {
   setDoc, updateDoc, deleteDoc, getDocs, writeBatch, serverTimestamp, deleteField
 } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js';
 import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-functions.js';
-import { store, configurePersistenceAdapter, hydrateCollection } from './store.js';
+import { store, configurePersistenceAdapter, hydrateCollection, hydrateCategories, hydrateSiteSettings } from './store.js';
 
 export const firebaseConfig = {
   apiKey: 'AIzaSyBDpG4pEd4bv3yQGB8nSjeKRwMtNJ4DILs',
@@ -450,6 +450,8 @@ export function startFirebaseBridge({ onSessionChanged }) {
     ownProducts = [];
     const q = query(collection(db, 'products'), where('status', '==', 'approved'));
     listen(q, snapshot => { publicProducts = unpack(snapshot); mergeProducts(); });
+    listen(collection(db, 'categories'), snapshot => hydrateCategories(unpack(snapshot)));
+    listen(doc(db, 'platformSettings', 'public'), snapshot => hydrateSiteSettings(snapshot.exists() ? toPlain(snapshot.data()) : {}));
     hydrateCollection('retailers', []);
     hydrateCollection('reports', []);
     hydrateCollection('orders', []);
