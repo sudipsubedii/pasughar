@@ -130,8 +130,8 @@ export async function confirmPhoneOtp(code, role = 'customer') {
   const confirmation = await phoneConfirmationResult.confirm(String(code || '').trim());
   phoneConfirmationResult = null;
   if (phoneVerifier) { try { await phoneVerifier.clear(); } catch {} phoneVerifier = null; }
-  await ensureUserProfile(confirmation.user, role);
-  return confirmation;
+  const profile = await ensureUserProfile(confirmation.user, role);
+  return {...confirmation, pashugharRole: profile.role || role};
 }
 export const isVerifiedContact = user => Boolean(user && (user.emailVerified === true || (typeof user.phoneNumber === 'string' && user.phoneNumber.length > 0)));
 export const signOutUser = () => signOut(auth);
