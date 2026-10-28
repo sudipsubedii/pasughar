@@ -354,15 +354,15 @@ exports.updateRetailerOrderStatus = onCall(async request => {
  */
 
 function validNepalMobile(value) {
-  return /^(?:\\+977)?9[6-8]\\d{8}$/.test(String(value||'').replace(/[\\s().-]/g,'').replace(/^0/,''));
+  return /^(?:\+977)?9[6-8]\d{8}$/.test(String(value||'').replace(/[\s().-]/g,'').replace(/^0/,''));
 }
 function validDate(value) {
-  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(String(value||''))) return false;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value||''))) return false;
   const d = new Date(value + 'T00:00:00Z');
   return Number.isFinite(d.getTime()) && d.toISOString().slice(0,10) === value;
 }
 function appointmentInstant(date, slot) {
-  if (!validDate(date) || !/^([01]\\d|2[0-3]):[0-5]\\d$/.test(String(slot||''))) return null;
+  if (!validDate(date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(slot||''))) return null;
   return new Date(date + 'T' + slot + ':00+05:45');
 }
 function pushNotificationTx(tx, uid, {type,title,body,relatedId}) {
