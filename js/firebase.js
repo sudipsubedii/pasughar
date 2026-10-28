@@ -97,6 +97,7 @@ export const sendVerificationEmail = async () => {
 export const refreshAuthUser = async () => {
   if (!auth.currentUser) return null;
   await reload(auth.currentUser);
+  await getIdTokenResult(auth.currentUser, true);
   return auth.currentUser;
 };
 function normalizePhoneNumber(value) {
