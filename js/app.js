@@ -102,13 +102,13 @@ const showToast = (message, type = '') => {
   toastRegion.append(element); setTimeout(() => element.remove(), 3200);
 };
 const NEPALI_SEARCH_ALIASES = {
-  'गाई':'cow cattle', 'गाईको':'cow cattle', 'गोरु':'ox cattle', 'भैंसी':'buffalo', 'राँगा':'buffalo',
-  'बाख्रा':'goat', 'खसी':'goat meat', 'भेडा':'sheep', 'कुखुरा':'chicken poultry', 'हाँस':'duck',
-  'कुकुर':'dog puppy', 'बिरालो':'cat kitten', 'मासु':'meat', 'कुखुराको मासु':'chicken meat',
-  'दूध':'milk', 'अण्डा':'egg eggs', 'घाँस':'fodder grass', 'दाना':'feed fodder',
-  'औषधि':'medicine medicine', 'भेटेरिनरी':'vet veterinary', 'पशु चिकित्सक':'vet veterinarian',
-  'पाल्तु':'pet companion', 'खोर':'cage coop', 'कलर':'collar', 'डोरी':'leash rope',
-  'खोप':'vaccine vaccination', 'खसीको मासु':'goat meat', 'माछा':'fish', 'सुँगुर':'pig pork'
+  'गाई':'cow', 'गाईको':'cow', 'गोरु':'ox', 'भैंसी':'buffalo', 'राँगा':'buffalo',
+  'बाख्रा':'goat', 'खसी':'goat', 'भेडा':'sheep', 'कुखुरा':'chicken', 'हाँस':'duck',
+  'कुकुर':'dog', 'बिरालो':'cat', 'मासु':'meat', 'कुखुराको मासु':'chicken meat',
+  'दूध':'milk', 'अण्डा':'egg', 'घाँस':'fodder', 'दाना':'feed',
+  'औषधि':'medicine', 'भेटेरिनरी':'veterinary', 'पशु चिकित्सक':'veterinarian',
+  'पाल्तु':'pet', 'खोर':'cage', 'कलर':'collar', 'डोरी':'leash',
+  'खोप':'vaccine', 'खसीको मासु':'goat meat', 'माछा':'fish', 'सुँगुर':'pig'
 };
 const normalizeSearchText = value => String(value ?? '').normalize('NFKC').toLocaleLowerCase().replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[\u200b-\u200f\ufeff]/g,'').replace(/[àáâãäå]/g,'a').replace(/[èéêë]/g,'e').replace(/[ìíîï]/g,'i').replace(/[òóôõö]/g,'o').replace(/[ùúûü]/g,'u');
 function searchExpansion(value) {
