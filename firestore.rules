@@ -42,7 +42,7 @@ service cloud.firestore {
       return data.name is string && data.name.size() > 0 && data.name.size() <= 120
         && data.description is string && data.description.size() > 0 && data.description.size() <= 2500
         && data.price is number && data.price > 0 && data.price <= 100000000
-        && data.stock is int && data.stock >= 0 && data.stock <= 1000000
+        && data.stock is number && data.stock >= 0 && data.stock <= 1000000
         && data.category is string && data.category.size() <= 80
         && data.unit is string && data.unit.size() <= 30
         && data.location is string && data.location.size() <= 220
@@ -210,11 +210,26 @@ service cloud.firestore {
 
     match /reviews/{reviewId} {
       allow read: if resource.data.status == 'published' || isAdmin() || (signedIn() && resource.data.customerId == request.auth.uid);
-      allow create: if signedIn()
+      allow create: if hasVerifiedContact()
+        && request.resource.data.keys().hasOnly(['productId','orderId','customerId','customerName','rating','body','status','createdAt'])
         && request.resource.data.customerId == request.auth.uid
-        && request.resource.data.status == 'pending'
+        && request.resource.data.productId is string
+        && request.resource.data.orderId is string
+        && reviewId == request.resource.data.orderId + '_' + request.resource.data.productId
+        && request.resource.data.customerName is string
+        && request.resource.data.customerName.size() > 0
+        && request.resource.data.customerName.size() <= 80
         && request.resource.data.rating is int
-        && request.resource.data.rating >= 1 && request.resource.data.rating <= 5;
+        && request.resource.data.rating >= 1 && request.resource.data.rating <= 5
+        && request.resource.data.body is string
+        && request.resource.data.body.size() >= 10
+        && request.resource.data.body.size() <= 1500
+        && request.resource.data.status == 'published'
+        && exists(/databases/$(database)/documents/orders/$(request.resource.data.orderId))
+        && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.customerId == request.auth.uid
+        && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.status == 'Delivered'
+        && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.productIds is list
+        && get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data.productIds.hasAny([request.resource.data.productId]);
       allow update, delete: if isAdmin();
     }
     match /wishlists/{userId} { allow read, write: if isOwner(userId); }
