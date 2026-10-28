@@ -1121,7 +1121,7 @@ function submitCheckout(form){
       }).catch(()=>{ if (submitButton) { submitButton.disabled = false; submitButton.textContent = `Place order · ${money(cartTotals(cart).subtotal)} →`; } });
     return;
   }
-  const totals=cartTotals(cart);const customer=session();const province=String(data.get('province')||''),district=String(data.get('district')||''),municipality=String(data.get('municipality')||''),deliverySlot=String(data.get('deliverySlot')||'');
+  const totals=cartTotals(cart);const customer=session();
   saveAddressFromCheckout({name,phone,address,city,province,district,municipality});
   const order={id:`PG-${new Date().getFullYear()}-${Math.random().toString(36).slice(2,8).toUpperCase()}`,customerName:name,customerEmail:customer?.email||'guest@pashughar.demo',phone,address,city,province,district,municipality,deliverySlot,notes,paymentMethod:data.get('payment')==='cod'?'Cash on delivery (demo)':'Contact retailer (demo)',status:'Pending',items:cart.map(i=>({id:i.id,qty:Number(i.qty),price:Number(getProduct(i.id).price),retailerId:getProduct(i.id).retailerId})),subtotal:totals.subtotal,total:totals.total,createdAt:new Date().toISOString(),demo:true};
   const products=allProducts().map(p=>{const item=cart.find(i=>i.id===p.id);return item?{...p,stock:Math.max(0,Number(p.stock)-Number(item.qty))}:p;});
