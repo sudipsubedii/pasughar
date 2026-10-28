@@ -420,7 +420,7 @@ function loadListingContactOptions(product) {
     if(!current||getRoute().path!=='product/'+decodeURIComponent(product.id))return;
     const phone=String(profile?.publicPhone||'').trim();
     if(!phone){current.innerHTML='<p class="small-muted">The seller has not published a public phone number. Use the in-site enquiry to contact them.</p>';return;}
-    const raw=phone.replace(/\\D/g,'');
+    const raw=phone.replace(/\D/g,'');
     const digits=raw.startsWith('977')?raw:raw.startsWith('0')?'977'+raw.slice(1):raw.startsWith('9')?'977'+raw:raw;
     if(!digits){current.innerHTML='';return;}
     current.innerHTML='<div class="seller-contact-card"><strong>Contact '+safe(profile.storeName||product.retailer||'seller')+'</strong><div class="seller-contact-actions"><a class="button button-secondary button-small" href="https://wa.me/'+safe(digits)+'" target="_blank" rel="noopener noreferrer">WhatsApp seller</a><a class="button button-secondary button-small" href="viber://chat?number='+encodeURIComponent('+'+digits)+'">Viber seller</a><a class="button button-secondary button-small" href="tel:+'+safe(digits)+'">Call seller</a></div></div>';
@@ -444,8 +444,8 @@ let lastRemovedCartItem = null;
 let lastCompletedOrder = null;
 const NEPAL_PHONE_PATTERN = /^(?:\\+977[- ]?)?(?:0)?9[6-8]\\d{8}$/;
 function isValidNepaliPhone(value) {
-  const digits = String(value || '').replace(/[\\s().-]/g, '');
-  return /^(?:\\+977)?9[6-8]\\d{8}$/.test(digits) || /^0?9[6-8]\\d{8}$/.test(digits);
+  const digits = String(value || '').replace(/[\s().-]/g, '');
+  return /^(?:\+977)?9[6-8]\d{8}$/.test(digits) || /^0?9[6-8]\d{8}$/.test(digits);
 }
 function getSavedAddresses() {
   try { const value = JSON.parse(localStorage.getItem(SAVED_ADDRESSES_KEY) || '[]'); return Array.isArray(value) ? value : []; } catch { return []; }
@@ -1492,7 +1492,7 @@ document.addEventListener('submit',e=>{
     e.preventDefault();const fd=new FormData(form);const user=session();if(!user||user.role!=='retailer')return showToast('Sign in as a retailer first.','error');
     let storeName=String(fd.get('storeName')||'').trim();let contactName=String(fd.get('contactName')||'').trim();const phone=String(fd.get('phone')||'').trim();let email=String(fd.get('email')||'').trim();const location=String(fd.get('location')||'').trim();const description=String(fd.get('description')||'').trim();
     const publicPhone=String(fd.get('publicPhone')||'').trim();const publicEmail=String(fd.get('publicEmail')||'').trim();const website=String(fd.get('website')||'').trim();const openingHours=String(fd.get('openingHours')||'').trim();const vetSpecialties=String(fd.get('vetSpecialties')||'').split(',').map(x=>x.trim()).filter(Boolean).slice(0,20);const vetAvailability=String(fd.get('vetAvailability')||'').trim();const vetAppointmentSlots=[...new Set(String(fd.get('vetAppointmentSlots')||'').split(',').map(x=>x.trim()).filter(Boolean))];const consultationFee=Math.max(0,Number(fd.get('consultationFee')||0));const isVet=fd.get('isVet')==='on';const verificationDocs=String(fd.get('verificationDocs')||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
-    if(website && !/^https:\/\//i.test(website))return showToast('Website must use an HTTPS URL.','warn');if(verificationDocs.length>5||verificationDocs.some(url=>{try{return new URL(url).protocol!=='https:';}catch{return true;}}))return showToast('Add up to five valid HTTPS document links.','warn');if(vetAppointmentSlots.length>24||vetAppointmentSlots.some(slot=>!/^([01]\\d|2[0-3]):[0-5]\\d$/.test(slot)))return showToast('Appointment times must use 24-hour HH:MM format, with up to 24 unique times.','error');if(isVet&&!vetAppointmentSlots.length)return showToast('Add at least one bookable time before enabling veterinary appointments.','warn');
+    if(website && !/^https:\/\//i.test(website))return showToast('Website must use an HTTPS URL.','warn');if(verificationDocs.length>5||verificationDocs.some(url=>{try{return new URL(url).protocol!=='https:';}catch{return true;}}))return showToast('Add up to five valid HTTPS document links.','warn');if(vetAppointmentSlots.length>24||vetAppointmentSlots.some(slot=>!/^([01]\d|2[0-3]):[0-5]\d$/.test(slot)))return showToast('Appointment times must use 24-hour HH:MM format, with up to 24 unique times.','error');if(isVet&&!vetAppointmentSlots.length)return showToast('Add at least one bookable time before enabling veterinary appointments.','warn');
     const retailers=store.retailers();const existing=retailerProfile(user);if(!existing)return renderSellerSetup(user);
     if(isFirebaseConfigured()){storeName=existing.storeName;contactName=existing.contactName;email=existing.email;}
     if(!storeName||!contactName||!phone||!email||!location)return showToast('Complete all required shop details.','error');
