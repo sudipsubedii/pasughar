@@ -83,6 +83,7 @@ exports.createOrder = onCall(async (request) => {
   return db.runTransaction(async (tx) => {
     const requestSnap = await tx.get(requestRef);
     if (requestSnap.exists) return { orderId: requestSnap.data().orderId, total: requestSnap.data().total, retailerCount: requestSnap.data().retailerCount, duplicateRequest: true };
+    const settingsSnap = await tx.get(db.collection('platformSettings').doc('public'));
     const snapshots = [];
     for (const ref of productRefs) snapshots.push(await tx.get(ref));
     const retailerIds = [...new Set(snapshots.filter(s => s.exists).map(s => asText(s.data().retailerId, 160)).filter(Boolean))];
@@ -108,8 +109,10 @@ exports.createOrder = onCall(async (request) => {
       total += lineTotal;
       resolvedItems.push({productId: snapshot.id, name: asText(product.name, 160), retailerId: product.retailerId, retailerName: asText(product.retailer, 160), quantity, unitPrice: product.price, lineTotal, unit: asText(product.unit, 30)});
     });
-    total = Math.round(total * 100) / 100;
-    if (!Number.isFinite(total) || total <= 0 || total > 100000000) throw new HttpsError('failed-precondition', 'The order total is invalid.');
+    const subtotal = Math.round(total * 100) / 100;
+    const deliveryFee = Math.max(0, Number(settingsSnap.exists ? settingsSnap.data().deliveryCharge : 0) || 0);
+    total = Math.round((subtotal + deliveryFee) * 100) / 100;
+    if (!Number.isFinite(total) || total <= 0 || total > 100100000) throw new HttpsError('failed-precondition', 'The order total is invalid.');
 
     const grouped = new Map();
     for (const item of resolvedItems) {
@@ -131,7 +134,8 @@ exports.createOrder = onCall(async (request) => {
       items: resolvedItems,
       productIds: resolvedItems.map(item => item.productId),
       deliveredProductIds: [],
-      subtotal: total,
+      subtotal,
+      deliveryFee,
       total,
       currency: 'NPR',
       paymentMethod,
@@ -813,7 +817,7 @@ exports.saveAdminSiteSettings = onCall(async request => {
   const data = {announcementText,bannerTitle,bannerText,bannerImage,announcementEnabled,deliveryCharge,commissionPercent,updatedBy:actor.uid,updatedAt:FieldValue.serverTimestamp()};
   await db.collection('platformSettings').doc('public').set(data,{merge:true});
   await db.collection('auditLogs').add({actorId:actor.uid,action:'site_settings_updated',targetId:'public',reason:'deliveryCharge='+deliveryCharge+'; commissionPercent='+commissionPercent,createdAt:FieldValue.serverTimestamp()});
-  return {saved:true,settings:data};
+  return {saved:true,settings:{announcementText,bannerTitle,bannerText,bannerImage,announcementEnabled,deliveryCharge,commissionPercent}};
 });
 
 /** Admin product CRUD. New admin-created listings remain pending until explicitly approved. */
