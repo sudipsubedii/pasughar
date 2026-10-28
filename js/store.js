@@ -13,6 +13,7 @@ const STORAGE_KEYS = {
 };
 
 const DEFAULT_SITE_SETTINGS = {
+  announcementEnabled: true,
   announcementText: 'Pashughar — a marketplace built for Nepal',
   bannerTitle: 'Everything for animals, all in one place.',
   bannerText: 'Discover livestock, fresh meat, pets, pet essentials and animal products from local retailers.',
