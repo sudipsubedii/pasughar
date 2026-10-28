@@ -37,6 +37,7 @@ let authGateActive = false;
 let authStateReady = !isFirebaseConfigured();
 let phoneDraft = '';
 let phoneOtpSent = false;
+let rememberAuthSession = true;
 let checkoutOtpSent = false;
 let verifiedCheckoutPhone = '';
 let inactivityTimer = null;
@@ -306,7 +307,7 @@ function renderAuthPage(defaultRole = authRole) {
   const roleOptions = '<option value="customer" '+(authRole==='customer'?'selected':'')+'>Customer</option><option value="retailer" '+(authRole==='retailer'?'selected':'')+'>Retailer</option>';
   const channelTabs = '<div class="auth-channel-tabs"><button type="button" class="'+(authChannel==='email'?'active':'')+'" data-action="auth-channel" data-channel="email">Email and password</button><button type="button" class="'+(authChannel==='phone'?'active':'')+'" data-action="auth-channel" data-channel="phone">Phone OTP</button></div>';
   const roleField = '<div class="field"><label for="auth-role">I am joining as</label><select id="auth-role" name="role">'+roleOptions+'</select><small>Administrator access is assigned separately and cannot be selected here.</small></div>';
-  const remember = '<label class="remember-choice"><input id="remember-me" type="checkbox" checked> Keep me signed in on this device</label>';
+  const remember = '<label class="remember-choice"><input id="remember-me" type="checkbox" '+(rememberAuthSession?'checked':'')+'> Keep me signed in on this device</label>';
   const emailPanel = authChannel==='email'
     ? '<form id="auth-email-form">'+roleField+'<div class="field"><label for="auth-email">Email address</label><input id="auth-email" name="email" type="email" required autocomplete="email" maxlength="254" placeholder="you@example.com"></div><div class="field"><label for="auth-password">Password</label><input id="auth-password" name="password" type="password" minlength="6" required autocomplete="'+(authMode==='signup'?'new-password':'current-password')+'" placeholder="At least 6 characters"></div>'+remember+'<button class="button button-primary button-wide" type="submit">'+(authMode==='signup'?'Create account':'Log in')+' →</button></form><button class="button button-secondary button-wide" data-action="auth-password-reset" type="button">Forgot password?</button><button class="button button-secondary button-wide" data-action="auth-google" type="button">Continue with Google</button>'
     : '';
@@ -523,7 +524,8 @@ function openBreedingBookingForm(productId) {
   if (!product || product.status !== 'approved' || product.category !== 'pets-supplies' || product.attributes?.petSection !== 'breeding') return showToast('This breeding listing is not available.','error');
   if (!isFirebaseConfigured()) return showToast('Breeding booking requests require Firebase sign-in and the live Firestore rules.','warn');
   const user = session();
-  if (!user) return showToast('Sign in with your customer account before requesting a breeding date.','warn');
+  if (!user) { showToast('Sign in with a customer account before requesting a breeding date.','warn'); navigate('#login'); return; }
+  if (!isVerifiedContact({emailVerified:user.emailVerified,phoneNumber:user.phoneNumber})) { showToast('Verify your email or phone before requesting a breeding date.','warn'); navigate('#account'); return; }
   const today = new Date(); const minDate = [today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-');
   modalContent.innerHTML = '<div class="modal-inner"><div class="modal-head"><div><div class="eyebrow">Pet breeding</div><h2>Request a breeding date</h2><p>'+safe(product.name)+' · '+safe(product.location||'Location not specified')+'</p></div><button class="modal-close" data-action="close-modal" aria-label="Close">×</button></div><form id="breeding-booking-form" data-product-id="'+safe(product.id)+'" data-retailer-id="'+safe(product.retailerId)+'" data-product-name="'+safe(product.name)+'"><div class="field"><label for="booking-name">Your name *</label><input id="booking-name" name="customerName" required maxlength="120" value="'+safe(user.name||'')+'"></div><div class="field"><label for="booking-phone">Phone number *</label><input id="booking-phone" name="customerPhone" required maxlength="40" inputmode="tel" placeholder="98XXXXXXXX"></div><div class="field"><label for="booking-date">Requested date *</label><input id="booking-date" name="requestedDate" type="date" min="'+minDate+'" required></div><div class="field"><label for="booking-location">Your location *</label><input id="booking-location" name="location" required maxlength="180" placeholder="City / district"></div><div class="field"><label for="booking-note">Note to the dog owner</label><textarea id="booking-note" name="note" maxlength="1000" placeholder="Share breed questions or preferred time."></textarea></div><div class="notice notice-info">This sends a request, not a confirmed booking. The dog owner must review and accept the date.</div><div class="modal-actions"><button type="button" class="button button-secondary" data-action="close-modal">Cancel</button><button type="submit" class="button button-primary">Send booking request →</button></div></form></div>';
   showModalWithHistory();
@@ -630,18 +632,18 @@ document.addEventListener('click',e=>{
     if(history.state?.pashugharInternal && history.length>1) history.back();
     else navigate(fallbackBackRoute(getRoute().path));
   }
-  else if(action==='auth-mode'){authRole=document.getElementById('auth-role')?.value||authRole;authMode=actionEl.dataset.mode==='signup'?'signup':'signin';phoneOtpSent=false;renderAuthPage(authRole);}
-  else if(action==='auth-channel'){authRole=document.getElementById('auth-role')?.value||authRole;authChannel=actionEl.dataset.channel==='phone'?'phone':'email';phoneOtpSent=false;renderAuthPage(authRole);}
+  else if(action==='auth-mode'){authRole=document.getElementById('auth-role')?.value||authRole;rememberAuthSession=document.getElementById('remember-me')?.checked!==false;authMode=actionEl.dataset.mode==='signup'?'signup':'signin';phoneOtpSent=false;renderAuthPage(authRole);}
+  else if(action==='auth-channel'){authRole=document.getElementById('auth-role')?.value||authRole;rememberAuthSession=document.getElementById('remember-me')?.checked!==false;authChannel=actionEl.dataset.channel==='phone'?'phone':'email';phoneOtpSent=false;renderAuthPage(authRole);}
   else if(action==='auth-google'){
     if(!isFirebaseConfigured())return showToast('Firebase is not configured.','error');
     const selectedRole=document.getElementById('auth-role')?.value||authRole;
-    const remember=document.getElementById('remember-me')?.checked!==false;
+    const remember=document.getElementById('remember-me')?.checked!==false;rememberAuthSession=remember;
     signInGoogle(selectedRole,remember).then(()=>showToast('Signed in with Google.')).catch(error=>showToast(firebaseErrorMessage(error),'error'));
   }
   else if(action==='send-phone-otp'){
     if(!isFirebaseConfigured())return showToast('Phone OTP requires Firebase Authentication.','error');
     const input=document.getElementById('auth-phone');phoneDraft=String(input?.value||'').trim();authRole=document.getElementById('auth-role')?.value||authRole;
-    const remember=document.getElementById('remember-me')?.checked!==false;
+    const remember=document.getElementById('remember-me')?.checked!==false;rememberAuthSession=remember;
     if(!phoneDraft)return showToast('Enter your mobile number first.','warn');
     sendPhoneOtp(phoneDraft,authRole,remember,'auth-send-phone-otp').then(()=>{phoneOtpSent=true;renderAuthPage(authRole);showToast('Verification code sent. Enter the code to continue.');}).catch(error=>showToast(firebaseErrorMessage(error),'error'));
   }
