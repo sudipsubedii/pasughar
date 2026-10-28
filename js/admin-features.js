@@ -13,6 +13,33 @@ const toast=message=>window.dispatchEvent(new CustomEvent('pashughar:admin-toast
 const builtInIds=new Set(['livestock','pets-supplies','meat','animal-products','animal-care']);
 const defaultPalette={accent:'#769382',deep:'#304E40',wash:'#EAF0EA',soft:'#F3EFE3',warm:'#C0C3B9',contrast:'#536C5D'};
 
+function applyOrderFilters(){
+ const queryText=String($('#admin-orders-search')?.value||'').toLowerCase().trim();
+ const status=String($('#admin-order-status')?.value||'all');
+ document.querySelectorAll('[data-admin-order-row]').forEach(row=>{
+  const matchesText=!queryText||String(row.dataset.orderSearch||'').includes(queryText);
+  const matchesStatus=status==='all'||row.dataset.orderStatus===status;
+  row.hidden=!(matchesText&&matchesStatus);
+ });
+}
+function downloadOrdersCsv(){
+ const headers=['Order ID','Created at','Customer','Email','Phone','Address','City','Items','Subtotal NPR','Delivery fee NPR','Total NPR','Payment method','Payment status','Order status'];
+ const csvValue=value=>'"'+String(value??'').replace(/"/g,'""')+'"';
+ const orders=store.orders().slice().sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+ const lines=[headers.map(csvValue).join(',')];
+ for(const order of orders){
+  const shipping=order.shipping||{};
+  const items=(Array.isArray(order.items)?order.items:[]).map(item=>(item.name||item.productName||item.productId||'Item')+' x '+(item.quantity??item.qty??1)).join('; ');
+  const created=order.createdAt?.toDate?order.createdAt.toDate().toISOString():String(order.createdAt||'');
+  const values=[order.id,created,order.customerName,order.customerEmail,shipping.phone||order.phone,shipping.address||order.shippingAddress,shipping.city,items,order.subtotal,order.deliveryFee,order.total??order.subtotal,order.paymentMethod,order.paymentStatus,order.status];
+  lines.push(values.map(csvValue).join(','));
+ }
+ const blob=new Blob(['\\uFEFF'+lines.join('\\r\\n')],{type:'text/csv;charset=utf-8;'});
+ const url=URL.createObjectURL(blob),anchor=document.createElement('a');
+ anchor.href=url;anchor.download='pashughar-orders-'+new Date().toISOString().slice(0,10)+'.csv';
+ document.body.appendChild(anchor);anchor.click();anchor.remove();URL.revokeObjectURL(url);
+ toast('Order CSV export generated.');
+}
 export async function renderAdminFeature(tab,host){
  if(!host)return;
  const currentAdmin=auth.currentUser;
@@ -122,6 +149,7 @@ export function installAdminFeatureHandlers(){
   const button=event.target.closest('[data-admin-user-action],[data-admin-category-edit],[data-admin-category-delete],[data-admin-category-clear],[data-admin-refresh]');
   if(!button)return;
   try{
+   if(button.hasAttribute('data-admin-export-orders')){downloadOrdersCsv();return;}
    if(button.hasAttribute('data-admin-refresh')){await renderAdminFeature((window.location.hash||'').split('=')[1]||'overview',$('#admin-feature-panel'));return;}
    if(button.hasAttribute('data-admin-category-clear')){const form=$('#admin-category-form');form?.reset();if(form){form.elements.originalId.value='';form.elements.id.readOnly=false;form.elements.id.value='';}$('#admin-category-existing').value='';return;}
    if(button.hasAttribute('data-admin-category-edit')){
@@ -157,7 +185,9 @@ export function installAdminFeatureHandlers(){
    const q=event.target.value.toLowerCase().trim();
    document.querySelectorAll('[data-admin-user-row]').forEach(row=>row.hidden=!row.dataset.search.includes(q));
   }
+  if(event.target.id==='admin-orders-search')applyOrderFilters();
  });
+ document.addEventListener('change',event=>{if(event.target.id==='admin-order-status')applyOrderFilters();});
  document.addEventListener('change',event=>{
   if(event.target.id==='admin-category-existing'){
    const id=event.target.value,form=$('#admin-category-form');
