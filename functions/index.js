@@ -500,11 +500,11 @@ exports.notifyOrderStatusChanged = onDocumentUpdated('orders/{orderId}', async e
   const before = event.data.before.data();
   const after = event.data.after.data();
   if (!after || !after.customerId || before.status === after.status) return;
-  await db.collection('users').doc(after.customerId).collection('notifications').add({
+  await db.collection('users').doc(after.customerId).collection('notifications').doc(hash('order-status:'+event.id)).set({
     type:'order',title:'Order status updated',
     body:'Order '+event.params.orderId+' is now '+asText(after.status,60)+'.',
     relatedId:event.params.orderId,read:false,createdAt:FieldValue.serverTimestamp()
-  });
+  }, {merge:true});
 });
 
 /** Wishlist notifications for real price reductions and out-of-stock -> back-in-stock transitions. */
@@ -522,9 +522,9 @@ exports.notifyWishlistProductChanges = onDocumentUpdated('products/{productId}',
     const body = priceDrop
       ? asText(after.name,160)+' price changed from NPR '+before.price+' to NPR '+after.price+'.'
       : asText(after.name,160)+' is available again.';
-    batch.set(db.collection('users').doc(userId).collection('notifications').doc(),{
+    batch.set(db.collection('users').doc(userId).collection('notifications').doc(hash('wishlist-change:'+event.id+':'+userId)),{
       type:priceDrop?'price-drop':'restock',title,body,relatedId:event.params.productId,read:false,createdAt:FieldValue.serverTimestamp()
-    });
+    }, {merge:true});
   }
   if (!wishlists.empty) await batch.commit();
 });
@@ -561,9 +561,9 @@ exports.sendAppointmentReminders = onSchedule('every 30 minutes', async () => {
 exports.notifyOrderCreated = onDocumentCreated('orders/{orderId}', async event => {
   const order=event.data && event.data.data();
   if(!order || !order.customerId)return;
-  await db.collection('users').doc(order.customerId).collection('notifications').add({
+  await db.collection('users').doc(order.customerId).collection('notifications').doc(hash('order-created:'+event.id)).set({
     type:'order',title:'Order placed successfully',
     body:'Your order '+event.params.orderId+' has been received. Current status: '+asText(order.status||'Pending',60)+'.',
     relatedId:event.params.orderId,read:false,createdAt:FieldValue.serverTimestamp()
-  });
+  }, {merge:true});
 });
