@@ -421,7 +421,7 @@ function loadListingContactActions(product) {
     const buttons=[];
     if(raw)buttons.push('<a class="button button-secondary" href="tel:'+safe(raw)+'">Call seller</a>');
     if(whatsappNumber.length>=7)buttons.push('<a class="button button-secondary" target="_blank" rel="noopener noreferrer" href="https://wa.me/'+whatsappNumber+'?text='+msg+'">WhatsApp seller</a>');
-    if(raw)buttons.push('<a class="button button-secondary" href="viber://chat?number='+encodeURIComponent(raw)">Viber seller</a>');
+    if(raw)buttons.push('<a class="button button-secondary" href="viber://chat?number='+encodeURIComponent(raw)+'">Viber seller</a>');
     if(buttons.length)host.insertAdjacentHTML('beforeend',buttons.join(''));
   }).catch(()=>{});
 }
