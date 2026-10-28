@@ -227,3 +227,33 @@ body[data-theme="dark"] .cloud-error-banner{background:#3c2723;color:#ffdbcf;bor
 .skeleton-price{height:19px;width:35%;border-radius:8px;margin-top:8px}
 @keyframes pashughar-skeleton{0%{background-position:100% 0}100%{background-position:-100% 0}}
 @media(prefers-reduced-motion:reduce){.skeleton-block{animation:none}}
+
+/* Retailer workspace feature sections */
+.category-attributes-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.category-attributes-grid [hidden]{display:none!important}
+.bulk-price-card{margin-top:20px}
+.bulk-price-card .field-grid{align-items:end}
+.earnings-statement{display:grid;gap:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;margin:18px 0}
+.earnings-statement>div{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:14px 16px;border-bottom:1px solid var(--line)}
+.earnings-statement>div:last-child{border-bottom:0;background:var(--canvas)}
+.earnings-statement span{color:var(--muted);font-size:13px}
+.earnings-statement strong{font-size:14px}
+.enquiry-card{padding:18px 0;border-bottom:1px solid var(--line)}
+.enquiry-card:last-child{border-bottom:0}
+.enquiry-card-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}
+.enquiry-card>p{white-space:pre-wrap;line-height:1.65}
+.enquiry-reply{margin:14px 0;padding:12px 14px;border-radius:12px;background:var(--canvas);border-left:3px solid var(--accent)}
+.enquiry-reply p{margin:6px 0 0;white-space:pre-wrap}
+.enquiry-reply-form{max-width:720px}
+.product-contact-actions{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:12px}
+.product-video-links{display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:12px 0}
+.product-video-links a{font-size:12px;font-weight:750;color:var(--accent)}
+.public-store-hero{display:grid;grid-template-columns:90px minmax(0,1fr);gap:24px;padding:clamp(22px,5vw,42px);margin:25px 0;border:1px solid var(--line);border-radius:24px;background:var(--paper);box-shadow:var(--shadow-soft)}
+.store-avatar{width:82px;height:82px;display:grid;place-items:center;border-radius:22px;background:var(--green);color:#fff;font-size:34px;font-weight:850}
+.public-store-hero h1{font-size:clamp(30px,4vw,46px);margin:5px 0 12px}
+.public-store-facts{display:flex;gap:10px 18px;flex-wrap:wrap;margin:18px 0;color:var(--muted);font-size:13px}
+.public-store-facts a{color:var(--green);font-weight:750;text-decoration:none}
+.vet-profile-summary{padding:16px 18px;margin-top:15px;border-radius:14px;background:var(--canvas)}
+.vet-profile-summary p{margin:7px 0;font-size:13px}
+body[data-theme="dark"] .vet-profile-summary{background:var(--canvas)}
+@media(max-width:640px){.category-attributes-grid{grid-template-columns:1fr}.public-store-hero{grid-template-columns:1fr}.store-avatar{width:64px;height:64px}.earnings-statement>div{align-items:flex-start}}
