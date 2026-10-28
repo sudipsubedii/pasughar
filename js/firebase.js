@@ -137,6 +137,33 @@ export async function confirmPhoneOtp(code, role = 'customer') {
 export const isVerifiedContact = user => Boolean(user && (user.emailVerified === true || (typeof user.phoneNumber === 'string' && user.phoneNumber.length > 0)));
 export const signOutUser = () => signOut(auth);
 export const getCallable = name => httpsCallable(functions, name);
+export async function getPublicStoreProfile(storeId) {
+  if (!storeId) throw new Error('Store ID is missing.');
+  const snap = await getDoc(doc(db,'publicStores',storeId));
+  if (!snap.exists()) return null;
+  return {id:snap.id,...toPlain(snap.data())};
+}
+async function writePublicStore(retailer) {
+  if (!auth.currentUser || auth.currentUser.uid !== String(retailer.ownerId || retailer.id)) return;
+  if (retailer.status !== 'approved') return;
+  const payload = {
+    storeId:auth.currentUser.uid,
+    storeName:String(retailer.storeName||'').slice(0,100),
+    description:String(retailer.description||'').slice(0,700),
+    location:String(retailer.location||'').slice(0,220),
+    publicPhone:String(retailer.publicPhone||retailer.phone||'').slice(0,40),
+    publicEmail:String(retailer.publicEmail||retailer.email||'').slice(0,254),
+    website:String(retailer.website||'').slice(0,300),
+    openingHours:String(retailer.openingHours||'').slice(0,700),
+    vetSpecialties:Array.isArray(retailer.vetSpecialties)?retailer.vetSpecialties.slice(0,20):[],
+    vetAvailability:String(retailer.vetAvailability||'').slice(0,700),
+    consultationFee:Math.max(0,Number(retailer.consultationFee)||0),
+    isVet:Boolean(retailer.isVet),
+    updatedAt:serverTimestamp()
+  };
+  await setDoc(doc(db,'publicStores',auth.currentUser.uid),payload,{merge:true});
+}
+
 export async function createProductEnquiry({productId, productName, retailerId, customerName, customerPhone, message}) {
   if (!auth.currentUser) throw new Error('Sign in to send the retailer an enquiry.');
   const text = String(message || '').trim();
@@ -250,11 +277,20 @@ configurePersistenceAdapter({
     fireError(error);
     throw error;
   }),
-  retailers: (previous, next) => persistChanges('retailers', previous, next).catch(error => {
-    hydrateCollection('retailers', previous);
-    fireError(error);
-    throw error;
-  }),
+  retailers: async (previous, next) => {
+    try {
+      await persistChanges('retailers', previous, next);
+      for (const record of (next || [])) {
+        if (record && record.status === 'approved' && String(record.ownerId || record.id) === auth.currentUser?.uid) {
+          await writePublicStore(record);
+        }
+      }
+    } catch(error) {
+      hydrateCollection('retailers', previous);
+      fireError(error);
+      throw error;
+    }
+  },
   enquiries: (previous, next) => persistChanges('enquiries', previous, next).catch(error => {
     hydrateCollection('enquiries', previous);
     fireError(error);
