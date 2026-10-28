@@ -1,0 +1,602 @@
+import {store, CATEGORIES, money, categoryName, normalizeCategoryId, slugId, safe, hydrateCollection} from './store.js';
+import {isFirebaseConfigured, signInGoogle, signInEmail, createEmailAccount, resetEmailPassword, signOutUser, startFirebaseBridge, getCallable, moderateRetailerDirect, moderateProductDirect, removeProductDirect} from './firebase.js';
+
+store.init();
+// In Firebase mode, never briefly display fictional sample catalogue/dashboard data while
+// the live Firestore listeners are starting. The actual records are loaded by the bridge below.
+if (isFirebaseConfigured()) {
+  hydrateCollection('products', []);
+  hydrateCollection('retailers', []);
+  hydrateCollection('orders', []);
+  hydrateCollection('reports', []);
+}
+// Clear legacy role-preview sessions from the earlier prototype after splitting access routes.
+const cachedSession = store.session();
+if (cachedSession && cachedSession.demoAccessVersion !== 2) store.saveSession(null);
+const app = document.getElementById('app');
+const toastRegion = document.getElementById('toast-region');
+const modal = document.getElementById('modal');
+const modalContent = document.getElementById('modal-content');
+let activeShopCategory = '';
+let activeShopQuery = '';
+let activeShopSort = 'featured';
+let activeShopStockOnly = false;
+let activeShopFiltersVisible = false;
+let sellerTab = 'products';
+let adminTab = 'products';
+let currentProductImageUrl = '';
+let currentProductImages = [];
+let activeProductImageIndex = 0;
+let activeReportFilter = 'open';
+let firebaseSession = null;
+
+const getRoute = () => {
+  const raw = location.hash.replace(/^#/, '') || 'home';
+  const [path, queryString = ''] = raw.split('?');
+  const params = new URLSearchParams(queryString);
+  return {path: path || 'home', params};
+};
+const allProducts = () => store.products();
+const activeProducts = () => allProducts().filter(p => p.status === 'approved' && (() => { const r = store.retailers().find(x => x.ownerId === p.retailerId || x.id === p.retailerId); return !r || r.status === 'approved'; })());
+const isAvailable = p => Number(p.stock) > 0;
+const getProduct = id => allProducts().find(p => p.id === id);
+const cartCount = () => store.cart().reduce((n, i) => n + Number(i.qty || 0), 0);
+const publicProductUrl = p => `#product/${encodeURIComponent(p.id)}`;
+const session = () => isFirebaseConfigured() ? firebaseSession : store.session();
+const demoSession = role => ({uid:`demo-${role}`,name: role === 'admin' ? 'Pashughar Admin' : role === 'retailer' ? 'Demo Retailer' : 'Demo Customer',email:`${role}@pashughar.demo`,role,storeName: ''});
+const statusLabel = status => ({approved:'Published',pending:'Pending verification',rejected:'Rejected',suspended:'Suspended',banned:'Banned',open:'Open',reviewing:'Under review',resolved:'Resolved',dismissed:'Dismissed'})[status] || status || 'Unknown';
+const statusClass = status => ({approved:'',pending:'status-pending',rejected:'status-rejected',suspended:'status-inactive',banned:'status-rejected',open:'status-pending',reviewing:'status-pending',resolved:'',dismissed:'status-inactive'})[status] || 'status-inactive';
+const shopStatusLabel = status => ({approved:'Verified',pending:'Pending verification',rejected:'Rejected',suspended:'Suspended',banned:'Banned'})[status] || status || 'Unknown';
+const showToast = (message, type = '') => {
+  const element = document.createElement('div'); element.className = `toast ${type}`; element.textContent = message;
+  toastRegion.append(element); setTimeout(() => element.remove(), 3200);
+};
+const productCard = p => {
+  const canonicalCategory = normalizeCategoryId(p.category);
+  const cardCategory = CATEGORIES.some(category => category.id === canonicalCategory) ? canonicalCategory : 'other';
+  return `
+  <article class="product-card product-card--${cardCategory}">
+    <div class="product-image-wrap"><a href="${publicProductUrl(p)}" aria-label="View ${safe(p.name)}"><img class="product-image" src="${safe(p.image || '')}" alt="${safe(p.name)}" loading="lazy" onerror="this.style.display='none';this.parentElement.style.background='#edf1e8'"></a>
+      <span class="product-badge ${isAvailable(p)?'':'sold-out'}">${isAvailable(p)?(p.isNew?'JUST ADDED':'IN STOCK'):'SOLD OUT'}</span>
+      <button class="wishlist-button" data-action="wishlist" data-id="${safe(p.id)}" aria-label="Add ${safe(p.name)} to wishlist">${store.wishlist().includes(p.id)?'♥':'♡'}</button>
+    </div>
+    <div class="product-content"><div class="product-store"><span class="store-dot"></span>${safe(p.retailer || 'Local retailer')}</div>
+      <a href="${publicProductUrl(p)}"><h3 class="product-title">${safe(p.name)}</h3></a>
+      <div class="product-meta"><span>${safe(p.location || 'Nepal')}</span><span>${safe(categoryName(canonicalCategory))}</span></div>
+      <div class="product-bottom"><div><span class="product-price">${money(p.price)}</span><span class="product-unit"> / ${safe(p.unit || 'item')}</span></div><button class="add-button" data-action="add-cart" data-id="${safe(p.id)}" aria-label="Add to cart" ${isAvailable(p)?'':'disabled'}>${isAvailable(p)?'+':'−'}</button></div>
+    </div>
+  </article>`;
+};
+const sectionHeading = (eyebrow, title, desc = '', action = '') => `<div class="section-head"><div><div class="eyebrow">${eyebrow}</div><h2>${title}</h2>${desc?`<p>${desc}</p>`:''}</div>${action?`<a href="#shop" class="section-link">${action} →</a>`:''}</div>`;
+const emptyState = (icon, title, desc, href = '#shop', label = 'Explore products') => `<div class="empty-state"><div class="empty-state-icon">${icon}</div><h2>${title}</h2><p>${desc}</p><a class="button button-primary" href="${href}">${label}</a></div>`;
+const demoNotice = () => isFirebaseConfigured() ? `<div class="notice notice-info"><strong>Firebase mode:</strong> Catalogue and retailer records sync with Firestore. Product images must use public HTTPS image URLs because Firebase Storage is intentionally disabled. Guest checkout and reports require the included Cloud Functions to be deployed.</div>` : `<div class="notice notice-warn"><strong>Prototype mode:</strong> Records in this ZIP are saved in this browser only. Connect Firebase before a public launch.</div>`;
+const retailerProfile = user => store.retailers().find(r => r.ownerId === user?.uid || (user?.email && r.email?.toLowerCase() === user.email.toLowerCase())) || null;
+const isVerifiedRetailer = user => Boolean(retailerProfile(user) && retailerProfile(user).status === 'approved');
+const openReportCount = retailerId => store.reports().filter(r => r.retailerId === retailerId && ['open','reviewing'].includes(r.status)).length;
+const sunIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/></svg>';
+const moonIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.8 15.3A8.5 8.5 0 0 1 8.7 3.2 8.7 8.7 0 1 0 20.8 15.3Z"/></svg>';
+function applyTheme(theme, persist = false) {
+  const value = theme === 'dark' ? 'dark' : 'light';
+  document.body.dataset.theme = value;
+  const button = document.getElementById('theme-toggle');
+  if (button) {
+    button.innerHTML = value === 'dark' ? sunIcon : moonIcon;
+    button.setAttribute('aria-label', value === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+    button.title = value === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+  }
+  if (persist) localStorage.setItem('pashughar.theme.v1', value);
+}
+function initializeTheme() {
+  let selected = 'light';
+  try { selected = localStorage.getItem('pashughar.theme.v1') || 'light'; } catch {}
+  applyTheme(selected);
+}
+function renderAuthFrame({eyebrow, title, description, icon, form, footnote = ''}) {
+  app.innerHTML = `<div class="auth-page"><div class="auth-card"><div class="auth-icon">${icon}</div><div class="eyebrow">${eyebrow}</div><h1>${title}</h1><p class="auth-description">${description}</p>${form}${footnote?`<p class="auth-footnote">${footnote}</p>`:''}<a class="auth-back-link" href="#home">← Back to shopping</a></div></div>`;
+}
+function authFormMarkup(prefix, isAdmin = false) {
+  if (!isFirebaseConfigured()) {
+    const id = isAdmin ? 'admin' : 'retailer';
+    return `<form id="${prefix}-form"><div class="field"><label for="${id}-username">${isAdmin?'Administrator':'Retailer'} ID</label><input id="${id}-username" name="username" autocomplete="username" required placeholder="Enter ${id} ID"></div><div class="field"><label for="${id}-password">Password</label><input id="${id}-password" name="password" type="password" autocomplete="current-password" required placeholder="Enter password"></div><button class="button button-primary button-wide" type="submit">Continue <span aria-hidden="true">→</span></button></form>`;
+  }
+  return `<form id="${prefix}-form"><div class="field"><label for="${prefix}-email">Email address</label><input id="${prefix}-email" name="email" type="email" autocomplete="email" required maxlength="254" placeholder="you@example.com"></div><div class="field"><label for="${prefix}-password">Password</label><input id="${prefix}-password" name="password" type="password" autocomplete="current-password" minlength="6" required placeholder="At least 6 characters"></div><button class="button button-primary button-wide" type="submit" name="authMode" value="signin">${isAdmin?'Sign in to admin':'Sign in to retailer workspace'} <span aria-hidden="true">→</span></button>${isAdmin?'':'<button class="button button-secondary button-wide" type="submit" name="authMode" value="signup">Create an account</button>'}</form><button class="button button-secondary button-wide" data-action="google-signin" type="button"><span aria-hidden="true">G</span> Continue with Google</button><button class="auth-signout" data-action="password-reset" type="button">Forgot password?</button>${isAdmin && firebaseSession ? '<button class="auth-signout" data-action="signout" type="button">Sign out to switch accounts</button>' : ''}`;
+}
+function renderRetailerLogin() {
+  renderAuthFrame({
+    eyebrow: 'Retailer workspace', title: 'Sign in to your shop',
+    description: 'Sign in with Google or email and password. Register your shop once, then wait for Pashughar verification before publishing products.',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 4.5 4h15L21 10.5"/><path d="M5 10.5v9h14v-9M9 19.5v-5h6v5"/><path d="M3 10.5a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/></svg>',
+    form: authFormMarkup('retailer-login', false),
+    footnote: isFirebaseConfigured() ? 'Your password is handled by Firebase Authentication. Pashughar never asks for your Google password. Shop approval is separate from account creation.' : '<strong>Demo mode:</strong> Retailer ID <code>retailer</code> · Password <code>retailer</code>.'
+  });
+}
+function renderAdminLogin() {
+  renderAuthFrame({
+    eyebrow: 'Restricted access', title: 'Pashughar admin',
+    description: isFirebaseConfigured() ? 'Admin access is granted only to accounts with a trusted server-side custom claim.' : 'Sign in to review product listings and oversee the marketplace.',
+    icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 20 6v5c0 5-3.3 8.2-8 10-4.7-1.8-8-5-8-10V6l8-3Z"/><path d="m9 12 2 2 4-4"/></svg>',
+    form: authFormMarkup('admin-login', true),
+    footnote: isFirebaseConfigured() ? 'Signing in does not make an account an admin. Accounts without the admin claim cannot open the control panel.' : '<strong>Demo mode only:</strong> ID <code>admin</code> · Password <code>admin</code>. Never deploy demo credentials.'
+  });
+}
+function renderSellerSetup(user) {
+  const profile = retailerProfile(user) || {};
+  app.innerHTML = `<div class="auth-page"><div class="auth-card auth-card-wide"><div class="auth-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 4.5 4h15L21 10.5"/><path d="M5 10.5v9h14v-9M9 19.5v-5h6v5"/><path d="M3 10.5a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/></svg></div><div class="eyebrow">One-time shop registration</div><h1>Register your shop</h1><p class="auth-description">Tell us who runs the shop and where it operates. Products cannot be published until an admin verifies the shop.</p><form id="retailer-profile-form"><div class="field"><label for="store-name">Shop / company name <span class="required-star">*</span></label><input id="store-name" name="storeName" required maxlength="100" ${isFirebaseConfigured()&&profile.id?'readonly':''} value="${safe(profile.storeName || user.storeName || '')}" placeholder="e.g. Himalayan Farm Supplies"></div><div class="field"><label for="store-contact-name">Contact person's full name <span class="required-star">*</span></label><input id="store-contact-name" name="contactName" required maxlength="100" ${isFirebaseConfigured()&&profile.id?'readonly':''} value="${safe(profile.contactName || user.name || '')}" placeholder="Person responsible for the shop"></div><div class="field-grid"><div class="field"><label for="store-contact">Phone number <span class="required-star">*</span></label><input id="store-contact" name="phone" inputmode="tel" required value="${safe(profile.phone || user.storePhone || '')}" placeholder="98XXXXXXXX"></div><div class="field"><label for="store-email">Email address <span class="required-star">*</span></label><input id="store-email" name="email" type="email" required ${isFirebaseConfigured()&&profile.id?'readonly':''} value="${safe(profile.email || user.email || '')}" placeholder="shop@example.com"></div></div><div class="field"><label for="store-location">Shop location / address <span class="required-star">*</span></label><input id="store-location" name="location" required maxlength="220" value="${safe(profile.location || user.storeLocation || '')}" placeholder="Municipality, district, province"></div><div class="field"><label for="store-about">About your shop</label><textarea id="store-about" name="description" maxlength="700" placeholder="What do you sell?">${safe(profile.description || user.storeDescription || '')}</textarea></div><div class="notice notice-info"><strong>Next step:</strong> ${isFirebaseConfigured()&&profile.id?'Shop name, contact name and account email are locked after submission; phone, location and description can be edited.':'Your shop status will be <strong>Pending verification</strong>.'} You can return to this retailer area to check the decision. After verification, you can publish products directly without product-by-product approval.</div><button class="button button-primary button-wide" type="submit">Submit shop for verification <span aria-hidden="true">→</span></button></form><button class="auth-signout" data-action="signout" type="button">Sign out</button></div></div>`;
+}
+function renderRetailerVerificationState(user, profile) {
+  const rejected = profile.status === 'rejected';
+  const banned = ['suspended','banned'].includes(profile.status);
+  const canEdit = !banned && !(isFirebaseConfigured() && rejected);
+  const title = rejected ? 'Shop verification needs attention' : banned ? 'Retailer access is paused' : 'Your shop is awaiting verification';
+  const copy = rejected
+    ? (isFirebaseConfigured() ? `The admin did not approve ${safe(profile.storeName)}. Contact Pashughar support to request another review.` : `The admin did not approve ${safe(profile.storeName)} yet. Update your shop details and request another review.`)
+    : banned ? `Retailer access for ${safe(profile.storeName)} is currently ${profile.status}. Contact Pashughar support for more information.` : `Pashughar is checking the details for ${safe(profile.storeName)}. You can publish products as soon as your shop is approved.`;
+  app.innerHTML = `<div class="page-wrap"><div class="container"><section class="verification-card"><div class="verification-symbol">${banned?'!':'◷'}</div><div class="eyebrow">Retailer verification</div><h1>${title}</h1><p>${copy}</p><div class="verification-details"><div><span>Shop</span><strong>${safe(profile.storeName)}</strong></div><div><span>Contact</span><strong>${safe(profile.contactName || user.name || '—')}</strong></div><div><span>Submitted email</span><strong>${safe(profile.email || user.email || '—')}</strong></div><div><span>Status</span><strong><span class="status-pill ${statusClass(profile.status)}">${shopStatusLabel(profile.status)}</span></strong></div></div><div class="hero-actions" style="justify-content:center">${canEdit?'<button class="button button-primary" data-action="edit-shop-registration">Update shop details</button>':''}<a class="button button-secondary" href="#home">Return to shopping</a><button class="button button-secondary" data-action="signout">Sign out</button></div></section></div></div>`;
+}
+
+function renderHome() {
+  delete app.dataset.sectionTheme;
+  const products = activeProducts();
+  const featured = products.slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).slice(0,4);
+  app.innerHTML = `
+    <section class="hero"><div class="container hero-grid"><div class="hero-copy"><div class="eyebrow">One marketplace. Every animal need.</div><h1>Everything for animals, <em>all in one place.</em></h1><p>Discover livestock, fresh meat, pets, pet essentials and animal products from retailers in one convenient marketplace.</p><div class="hero-actions"><a href="#shop" class="button button-primary">Explore marketplace <span>→</span></a><a href="#seller" class="button button-secondary">Become a retailer</a></div><div class="hero-proof"><span class="proof-point"><span class="proof-check">✓</span> Local retailers</span><span class="proof-point"><span class="proof-check">✓</span> Clear stock status</span><span class="proof-point"><span class="proof-check">✓</span> One easy marketplace</span></div></div>
+    <div class="hero-visual"><img src="https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1200&q=85" alt="Green farmland and agricultural fields" fetchpriority="high"><div class="hero-sticker"><strong>All together.</strong><span>From farm essentials to pet favourites.</span></div><div class="hero-image-label"><span>Welcome to Pashughar</span><h2>Closer to the things you care for.</h2><p>Shop from a growing community of animal and farm retailers.</p></div></div></div></section>
+    <section class="category-section"><div class="container">${sectionHeading('Browse the marketplace','What are you looking for?','Choose a category to start.')}</div><div class="container category-grid">${CATEGORIES.map(c=>`<a class="category-card category-card--${c.id}" href="#shop?category=${c.id}" style="--category-accent:${c.palette.accent};--category-deep:${c.palette.deep};--category-wash:${c.palette.wash}"><img class="category-photo" src="${safe(c.image)}" alt="" loading="lazy"><span class="category-card-copy"><span class="category-kicker">${safe(c.kicker)}</span><h3>${safe(c.name)}</h3><p>${safe(c.cardDescription)}</p><span class="category-card-link">Explore category <span aria-hidden="true">↗</span></span></span></a>`).join('')}</div></section>
+    <section class="products-section"><div class="container">${sectionHeading('Picked for you','Recently added','New listings from participating retailers.','View all products')}<div class="product-grid">${featured.map(productCard).join('')}</div>${featured.length===0?emptyState('⌕','No products yet','Approved product listings will appear here.','#seller','Join as a retailer'):''}</div></section>
+    <section class="trust-strip"><div class="container trust-grid"><div class="trust-item"><div class="trust-icon">♧</div><div><strong>A wider choice</strong><span>Products from multiple retailers</span></div></div><div class="trust-item"><div class="trust-icon">✓</div><div><strong>Clear availability</strong><span>Know what is in stock before ordering</span></div></div><div class="trust-item"><div class="trust-icon">⌖</div><div><strong>Local marketplace</strong><span>Discover sellers around Nepal</span></div></div><div class="trust-item"><div class="trust-icon">♡</div><div><strong>Animal needs, together</strong><span>From livestock to everyday pet care</span></div></div></div></section>
+    <section class="seller-cta"><div class="container"><div class="seller-cta-inner"><div><div class="eyebrow">For retailers and suppliers</div><h2>Bring your animal products to more people.</h2><p>List your products, manage stock and keep orders organized with your own retailer workspace.</p></div><a href="#seller" class="button">Start selling on Pashughar <span>→</span></a></div></div></section>`;
+}
+
+function renderShop(params = new URLSearchParams()) {
+  activeShopCategory = normalizeCategoryId(params.get('category') || activeShopCategory || '');
+  activeShopQuery = params.get('q') ?? activeShopQuery;
+  const sectionCategory = CATEGORIES.find(category => category.id === activeShopCategory);
+  if (sectionCategory) app.dataset.sectionTheme = sectionCategory.id;
+  else delete app.dataset.sectionTheme;
+  let items = activeProducts();
+  if(activeShopCategory) items = items.filter(p=>p.category===activeShopCategory);
+  if(activeShopStockOnly) items = items.filter(isAvailable);
+  const q = activeShopQuery.trim().toLowerCase();
+  if(q) items = items.filter(p=>[p.name,p.description,p.retailer,p.location,categoryName(p.category)].join(' ').toLowerCase().includes(q));
+  if(activeShopSort==='price-asc') items.sort((a,b)=>Number(a.price)-Number(b.price));
+  if(activeShopSort==='price-desc') items.sort((a,b)=>Number(b.price)-Number(a.price));
+  if(activeShopSort==='newest') items.sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+  if(activeShopSort==='name') items.sort((a,b)=>a.name.localeCompare(b.name));
+  const checked = (id) => activeShopCategory===id?'checked':'';
+  const categoryBanner = sectionCategory ? `<section class="category-shop-banner" style="--section-accent:${sectionCategory.palette.accent};--section-deep:${sectionCategory.palette.deep};--section-wash:${sectionCategory.palette.wash};--section-soft:${sectionCategory.palette.soft};--section-warm:${sectionCategory.palette.warm}"><div class="category-shop-copy"><div class="eyebrow">${safe(sectionCategory.kicker)}</div><h1>${safe(sectionCategory.name)}</h1><p>${safe(sectionCategory.description)}. Explore approved listings from local retailers.</p><a href="#shop" class="category-back-link">View all categories <span aria-hidden="true">→</span></a></div><div class="category-shop-image"><img src="${safe(sectionCategory.image)}" alt="" loading="lazy"></div></section>` : `<div class="page-title-row"><div><div class="eyebrow">The Pashughar marketplace</div><h1>Explore all products</h1><p>Find products and livestock offered by local retailers.</p></div></div>`;
+  app.innerHTML = `<div class="page-wrap"><div class="container"><div class="breadcrumbs"><a href="#home">Home</a> / Marketplace</div><div class="shop-heading-row">${categoryBanner}<button class="button button-secondary mobile-filter-button" data-action="toggle-filters">☷ Filters</button></div>${demoNotice()}<div class="shop-layout"><aside class="filter-panel ${activeShopFiltersVisible?'filters-open':''}" id="filter-panel"><h3>Filter products</h3><div class="filter-group"><h4>Categories</h4><div class="filter-options"><label class="filter-option"><input type="radio" name="category-filter" value="" ${!activeShopCategory?'checked':''}> All categories</label>${CATEGORIES.map(c=>`<label class="filter-option"><input type="radio" name="category-filter" value="${c.id}" ${checked(c.id)}> ${c.name}</label>`).join('')}</div></div><div class="filter-group"><h4>Availability</h4><label class="filter-option"><input type="checkbox" id="stock-filter" ${activeShopStockOnly?'checked':''}> In stock only</label></div><div class="filter-group"><button class="button button-secondary button-wide" data-action="reset-filters">Clear filters</button></div></aside><div><div class="shop-toolbar"><span class="result-count">Showing <strong>${items.length}</strong> product${items.length===1?'':'s'}</span><select id="sort-select" aria-label="Sort products"><option value="featured" ${activeShopSort==='featured'?'selected':''}>Featured</option><option value="newest" ${activeShopSort==='newest'?'selected':''}>Newest first</option><option value="price-asc" ${activeShopSort==='price-asc'?'selected':''}>Price: low to high</option><option value="price-desc" ${activeShopSort==='price-desc'?'selected':''}>Price: high to low</option><option value="name" ${activeShopSort==='name'?'selected':''}>Name A–Z</option></select></div><div class="product-grid">${items.map(productCard).join('')}</div>${items.length===0?emptyState('⌕','No matching products','Try another search or clear filters to explore more listings.','#shop','Clear and browse all'):''}</div></div></div></div>`;
+}
+
+function renderProduct(id) {
+  const p = getProduct(id);
+  if (p) app.dataset.sectionTheme = normalizeCategoryId(p.category); else delete app.dataset.sectionTheme;
+  if(!p || p.status!=='approved' || !activeProducts().some(x=>x.id===p.id)) { app.innerHTML = `<div class="page-wrap"><div class="container">${emptyState('⌕','Product not found','This product may have been removed or is not currently published.','#shop','Back to marketplace')}</div></div>`; return; }
+  const related = activeProducts().filter(x=>x.category===p.category && x.id!==p.id).slice(0,4);
+  const attrs = Object.entries(p.attributes||{}).filter(([,v])=>v).slice(0,4);
+  const images = (Array.isArray(p.images) && p.images.length ? p.images : [p.image]).filter(Boolean).slice(0,5);
+  if(activeProductImageIndex >= images.length) activeProductImageIndex = 0;
+  const mainImage = images[activeProductImageIndex] || p.image || '';
+  app.innerHTML = `<div class="page-wrap"><div class="container"><div class="breadcrumbs"><a href="#home">Home</a> / <a href="#shop">Marketplace</a> / ${safe(categoryName(p.category))} / ${safe(p.name)}</div><div class="product-detail-grid"><div class="detail-image"><img src="${safe(mainImage)}" alt="${safe(p.name)}" onerror="this.style.display='none'">${images.length>1?`<div class="detail-gallery">${images.map((src,i)=>`<button type="button" class="gallery-thumb ${i===activeProductImageIndex?'active':''}" data-action="set-product-image" data-id="${safe(p.id)}" data-index="${i}" aria-label="View product image ${i+1}"><img src="${safe(src)}" alt=""></button>`).join('')}</div>`:''}</div><div class="detail-copy"><div class="detail-category">${safe(categoryName(p.category))} · ${safe(p.condition||'Listed product')}</div><h1>${safe(p.name)}</h1><div class="product-store"><span class="store-dot"></span>${safe(p.retailer||'Local retailer')} · ${safe(p.location||'Nepal')}</div><div class="detail-price">${money(p.price)} <span>/ ${safe(p.unit||'item')}</span></div><span class="status-pill ${isAvailable(p)?'':'status-soldout'}"><span class="status-dot"></span>${isAvailable(p)?`In stock · ${Number(p.stock)} ${safe(p.unit||'item')}${Number(p.stock)===1?'':'s'}`:'Sold out'}</span><p class="detail-description">${safe(p.description)}</p>${attrs.length?`<div class="detail-meta">${attrs.map(([k,v])=>`<div class="meta-box"><span>${safe(k.replace(/([A-Z])/g,' $1').replace(/^./,s=>s.toUpperCase()))}</span><strong>${safe(v)}</strong></div>`).join('')}</div>`:''}<div class="quantity-row"><label for="detail-qty">Quantity</label><div class="quantity-control"><button data-action="qty-minus" aria-label="Decrease quantity">−</button><input id="detail-qty" type="number" value="1" min="1" max="${Math.max(1,Number(p.stock))}" aria-label="Quantity"><button data-action="qty-plus" aria-label="Increase quantity" ${isAvailable(p)?'':'disabled'}>+</button></div><span class="small-muted">per ${safe(p.unit||'item')}</span></div><div class="detail-actions"><button class="button button-primary" data-action="detail-add" data-id="${safe(p.id)}" ${isAvailable(p)?'':'disabled'}>${isAvailable(p)?'Add to cart':'Sold out'}</button><button class="button button-secondary" data-action="wishlist" data-id="${safe(p.id)}">${store.wishlist().includes(p.id)?'♥ Saved':'♡ Save item'}</button></div><button class="report-link" data-action="report-product" data-id="${safe(p.id)}" type="button"><span aria-hidden="true">⚑</span> Report this listing</button><div class="notice notice-info">Marketplace note: verify seller details, product specifications and any relevant animal health or food-safety documentation before completing a purchase.</div></div></div>${related.length?`<section class="products-section">${sectionHeading('Keep exploring','Similar listings','','View all')}<div class="product-grid">${related.map(productCard).join('')}</div></section>`:''}</div></div>`;
+}
+function cartTotals(cart) {
+  const subtotal = cart.reduce((sum, item)=>{const p=getProduct(item.id);return sum+(p?Number(p.price)*Number(item.qty):0)},0);
+  return {subtotal,delivery:0,total:subtotal};
+}
+function renderCart() {
+  const cart = store.cart().filter(i=>getProduct(i.id));
+  if(cart.length===0) {app.innerHTML=`<div class="page-wrap"><div class="container"><div class="page-title-row"><div><div class="eyebrow">Your basket</div><h1>Shopping cart</h1></div></div>${emptyState('♧','Your cart is empty','Browse the marketplace and add products you want to order.','#shop','Explore products')}</div></div>`;return;}
+  const {subtotal,delivery,total}=cartTotals(cart);
+  app.innerHTML=`<div class="page-wrap"><div class="container"><div class="breadcrumbs"><a href="#home">Home</a> / Your cart</div><div class="page-title-row"><div><div class="eyebrow">Nearly there</div><h1>Your shopping cart</h1><p>${cartCount()} items across ${new Set(cart.map(i=>getProduct(i.id)?.retailerId)).size} retailer(s)</p></div><a class="button button-secondary" href="#shop">← Continue shopping</a></div>${demoNotice()}<div class="cart-layout"><section class="cart-items">${cart.map(i=>{const p=getProduct(i.id);return `<div class="cart-row"><img class="cart-thumb" src="${safe(p.image||'')}" alt="${safe(p.name)}" onerror="this.style.display='none'"><div><a href="${publicProductUrl(p)}" class="cart-name">${safe(p.name)}</a><div class="cart-sub">${safe(p.retailer||'Local retailer')} · ${money(p.price)} / ${safe(p.unit||'item')}</div><div class="cart-row-controls"><div class="mini-quantity"><button data-action="cart-minus" data-id="${safe(p.id)}" aria-label="Decrease">−</button><span>${i.qty}</span><button data-action="cart-plus" data-id="${safe(p.id)}" aria-label="Increase" ${Number(p.stock)<=Number(i.qty)?'disabled':''}>+</button></div><button class="remove-button" data-action="remove-cart" data-id="${safe(p.id)}">Remove</button></div></div><div class="cart-row-price">${money(Number(p.price)*Number(i.qty))}</div></div>`}).join('')}</section><aside class="summary-card"><h3>Order summary</h3><div class="summary-line"><span>Subtotal</span><strong>${money(subtotal)}</strong></div><div class="summary-line"><span>Delivery</span><strong>${delivery===0?'Calculated by seller':money(delivery)}</strong></div><div class="summary-line total"><span>Estimated total</span><strong>${money(total)}</strong></div><p class="summary-note">Delivery costs and final fulfilment details will be confirmed by the retailer. This demo does not process real payments.</p><button class="button button-primary button-wide" data-action="go-checkout">Continue to checkout →</button></aside></div><div id="checkout-area"></div></div></div>`;
+}
+function renderCheckout() {
+  const cart = store.cart().filter(i=>getProduct(i.id));
+  if(!cart.length) {location.hash='#cart';return;}
+  const {subtotal,total}=cartTotals(cart);
+  const existing = document.getElementById('checkout-area');
+  if(existing) existing.innerHTML=`<div class="panel-card" style="margin-top:22px"><div class="panel-heading"><div><h2>Checkout</h2><p>${isFirebaseConfigured()?'Enter delivery information. Stock and order totals are validated on the server.':'Enter delivery information to place a demo order.'}</p></div></div>${demoNotice()}<form id="checkout-form" data-request-id="${safe((globalThis.crypto?.randomUUID?.() || slugId()))}"><div class="field-grid"><div class="field"><label for="checkout-name">Full name *</label><input id="checkout-name" name="name" required value="${safe(session()?.name||'')}" placeholder="Your full name"></div><div class="field"><label for="checkout-phone">Phone number *</label><input id="checkout-phone" name="phone" required inputmode="tel" placeholder="98XXXXXXXX"></div></div><div class="field"><label for="checkout-address">Delivery address *</label><textarea id="checkout-address" name="address" required placeholder="Street, area, municipality"></textarea></div><div class="field-grid"><div class="field"><label for="checkout-city">City / district *</label><input id="checkout-city" name="city" required placeholder="e.g. Pokhara"></div><div class="field"><label for="checkout-notes">Order notes</label><input id="checkout-notes" name="notes" placeholder="Optional instructions"></div></div><h4 class="form-section-title">Payment method</h4><label class="radio-card"><input type="radio" name="payment" value="cod" checked><div><strong>Cash on delivery</strong><span>No online payment is processed; the retailer will coordinate fulfilment.</span></div></label><label class="radio-card"><input type="radio" name="payment" value="contact_seller"><div><strong>Contact retailer to arrange payment</strong><span>Use this for listings that require coordination before fulfilment.</span></div></label><div class="summary-line total"><span>Order subtotal</span><strong>${money(total)}</strong></div><p class="small-muted">${isFirebaseConfigured()?'No online payment is processed. The order will be placed only if the secure order service is deployed and validation succeeds.':'Placing this demo order records it only in this browser. No real order is sent to a retailer.'}</p><button type="submit" class="button button-primary">${isFirebaseConfigured()?'Place order':'Place demo order'} · ${money(subtotal)} →</button></form></div>`;
+  existing?.scrollIntoView({behavior:'smooth',block:'start'});
+}
+function renderSellerLanding() { renderRetailerLogin(); }
+function renderSellerDashboard() {
+  const user=session();
+  if (!user || user.role !== 'retailer') { renderRetailerLogin(); return; }
+  const profile = retailerProfile(user);
+  if (!profile || !String(profile.storeName || '').trim()) { renderSellerSetup(user); return; }
+  Object.assign(user,{storeName:profile.storeName,storeSetupComplete:true,storePhone:profile.phone,storeLocation:profile.location,storeDescription:profile.description,storeStatus:profile.status});
+  if(!isFirebaseConfigured()) store.saveSession(user);
+  if(profile.status !== 'approved') { renderRetailerVerificationState(user, profile); return; }
+  const myProducts=allProducts().filter(p=>p.retailerId===user.uid || (user.uid==='demo-retailer' && p.retailerId==='retailer-demo'));
+  const allOrders=store.orders();
+  const myOrders=allOrders.filter(o=>o.items.some(item=>{const p=getProduct(item.id);return p && (p.retailerId===user.uid || (user.uid==='demo-retailer' && p.retailerId==='retailer-demo'));}));
+  app.innerHTML=`<div class="dashboard-shell"><div class="container"><div class="dashboard-header"><div><div class="eyebrow">Verified retailer workspace</div><h1>${safe(user.storeName)}</h1><p>Welcome, ${safe(profile.contactName || user.name)}. Publish listings and manage your products and orders.</p><div class="retailer-badges"><span class="status-pill">✓ Verified shop</span><span class="status-pill status-pending">${openReportCount(profile.ownerId)} open report(s)</span></div></div><button class="button button-primary" data-action="seller-new-product">＋ Add a product</button></div>${demoNotice()}<div class="dashboard-layout"><aside class="dashboard-sidebar"><div class="sidebar-identity"><div class="avatar">${safe((user.storeName||user.name).slice(0,1).toUpperCase())}</div><div><strong>${safe(user.storeName)}</strong><span>Verified retailer</span></div></div><nav class="sidebar-nav"><button class="${sellerTab==='products'?'active':''}" data-action="seller-tab" data-tab="products">▦ My products</button><button class="${sellerTab==='orders'?'active':''}" data-action="seller-tab" data-tab="orders">▤ Orders</button><button class="${sellerTab==='profile'?'active':''}" data-action="seller-tab" data-tab="profile">♙ Store profile</button><button data-action="signout">↪ Sign out</button></nav></aside><section class="dashboard-content">${sellerTab==='products'?renderSellerProducts(myProducts):sellerTab==='orders'?renderRetailerOrders(myOrders):renderSellerProfile(user)}</section></div></div></div>`;
+}
+
+function renderSellerProducts(items) {
+  return `<div class="metric-grid"><div class="metric-card"><div class="metric-top">All listings <span class="metric-symbol">▦</span></div><div class="metric-number">${items.length}</div><div class="metric-foot">Products in your store</div></div><div class="metric-card"><div class="metric-top">Published <span class="metric-symbol">✓</span></div><div class="metric-number">${items.filter(p=>p.status==='approved').length}</div><div class="metric-foot">Visible to customers</div></div><div class="metric-card"><div class="metric-top">Open reports <span class="metric-symbol">⚑</span></div><div class="metric-number">${openReportCount(session()?.uid)}</div><div class="metric-foot">Reports awaiting admin action</div></div><div class="metric-card"><div class="metric-top">Sold out <span class="metric-symbol">−</span></div><div class="metric-number">${items.filter(p=>Number(p.stock)<=0).length}</div><div class="metric-foot">Inventory at zero</div></div></div><div class="panel-card"><div class="panel-heading"><div><h2>Your product listings</h2><p>Verified retailers can publish directly. Keep product information and stock accurate.</p></div><button class="button button-primary button-small" data-action="seller-new-product">＋ Add product</button></div>${items.length?`<div class="table-scroll"><table><thead><tr><th>Product</th><th>Price</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead><tbody>${items.map(p=>`<tr><td><div class="table-product"><img src="${safe(p.image||'')}" alt="" onerror="this.style.display='none'"><div><strong>${safe(p.name)}</strong><span>${safe(categoryName(p.category))} · ${safe(p.unit)}</span></div></div></td><td>${money(p.price)}</td><td>${Number(p.stock)} ${safe(p.unit)}</td><td><span class="status-pill ${p.status==='approved'?'':'status-inactive'}"><span class="status-dot"></span>${p.status==='approved'?(isAvailable(p)?'Published':'Sold out'):statusLabel(p.status)}</span></td><td><div class="inline-actions"><button class="tiny-action" data-action="edit-product" data-id="${safe(p.id)}">Edit</button><button class="tiny-action danger" data-action="delete-product" data-id="${safe(p.id)}">Remove</button></div></td></tr>`).join('')}</tbody></table></div>`:`${emptyState('＋','No listings yet','Once your shop is verified, add your first product to start selling.','#seller','Return to shop dashboard')}`}</div>`;
+}
+
+function renderRetailerOrders(orders) {
+  if(!orders.length)return `<div class="panel-card">${emptyState('▤','No orders yet','When customers order your published products, their orders will appear here.','#shop','View marketplace')}</div>`;
+  return `<div class="panel-card"><div class="panel-heading"><div><h2>Orders for your products</h2><p>${isFirebaseConfigured()?'Orders assigned to your shop.':'Demo orders saved in this browser.'}</p></div></div><div class="table-scroll"><table><thead><tr><th>Order</th><th>Customer</th><th>Items</th><th>Total</th><th>Status</th><th>Update</th></tr></thead><tbody>${orders.map(o=>`<tr><td>${safe(o.orderId||o.id)}</td><td>${safe(o.customerName)}</td><td>${o.items.filter(i=>{const p=getProduct(i.id);return isFirebaseConfigured()?true:(p&&p.retailerId===session().uid)}).length}</td><td>${money(o.total)}</td><td><span class="status-pill status-pending">${safe(o.status)}</span></td><td><select data-action="retailer-order-status" data-id="${safe(o.id)}" aria-label="Update order status"><option ${o.status==='Pending'?'selected':''}>Pending</option><option ${o.status==='Confirmed'?'selected':''}>Confirmed</option><option ${o.status==='Processing'?'selected':''}>Processing</option><option ${o.status==='Shipped'?'selected':''}>Shipped</option><option ${o.status==='Delivered'?'selected':''}>Delivered</option><option ${o.status==='Cancelled'?'selected':''}>Cancelled</option></select></td></tr>`).join('')}</tbody></table></div></div>`;
+}
+function renderSellerProfile(user) {
+  const profile = retailerProfile(user) || {};
+  return `<div class="panel-card"><div class="panel-heading"><div><h2>Shop profile</h2><p>Keep your shop identity and contact details up to date.</p></div><span class="status-pill">${shopStatusLabel(profile.status)}</span></div><form id="seller-profile-form"><div class="field"><label for="store-name">Shop / company name *</label><input id="store-name" name="storeName" required maxlength="100" ${isFirebaseConfigured()?'readonly':''} value="${safe(profile.storeName || user.storeName || '')}"></div><div class="field"><label for="store-contact-name">Contact person's full name *</label><input id="store-contact-name" name="contactName" required maxlength="100" ${isFirebaseConfigured()?'readonly':''} value="${safe(profile.contactName || user.name || '')}"></div><div class="field-grid"><div class="field"><label for="store-contact">Phone *</label><input id="store-contact" name="phone" required value="${safe(profile.phone || user.storePhone || '')}" placeholder="98XXXXXXXX"></div><div class="field"><label for="store-email">Email *</label><input id="store-email" name="email" type="email" required ${isFirebaseConfigured()?'readonly':''} value="${safe(profile.email || user.email || '')}"></div></div><div class="field"><label for="store-location">Location *</label><input id="store-location" name="location" required value="${safe(profile.location || user.storeLocation || '')}" placeholder="City / district"></div><div class="field"><label for="store-about">Shop description</label><textarea id="store-about" name="description" maxlength="700">${safe(profile.description || user.storeDescription || '')}</textarea></div><p class="small-muted">Shop verification is handled by Pashughar. Editing contact details will not grant or restore a suspended account.</p><button class="button button-primary" type="submit">Save shop profile</button></form></div>`;
+}
+
+function renderAdmin() {
+  const all=allProducts();const orders=store.orders();const retailers=store.retailers();const reports=store.reports();
+  const awaiting=retailers.filter(r=>r.status==='pending');
+  const openReports=reports.filter(r=>['open','reviewing'].includes(r.status));
+  const published=all.filter(p=>p.status==='approved');
+  app.innerHTML=`<div class="dashboard-shell"><div class="container"><div class="dashboard-header"><div><div class="eyebrow">Private Pashughar control centre</div><h1>Main administrator</h1><p>Verify shops, review live reports and protect the marketplace.</p></div>${isFirebaseConfigured()?'':'<button class="button button-secondary" data-action="reset-demo">Reset demo data</button>'}</div>${demoNotice()}<div class="dashboard-layout"><aside class="dashboard-sidebar"><div class="sidebar-identity"><div class="avatar">P</div><div><strong>Pashughar Admin</strong><span>Private administration</span></div></div><nav class="sidebar-nav"><button class="${adminTab==='retailers'?'active':''}" data-action="admin-tab" data-tab="retailers">♙ Shop verification ${awaiting.length?`(${awaiting.length})`:''}</button><button class="${adminTab==='reports'?'active':''}" data-action="admin-tab" data-tab="reports">⚑ Reports ${openReports.length?`(${openReports.length})`:''}</button><button class="${adminTab==='products'?'active':''}" data-action="admin-tab" data-tab="products">▦ Product control</button><button class="${adminTab==='orders'?'active':''}" data-action="admin-tab" data-tab="orders">▤ Orders</button><button class="${adminTab==='settings'?'active':''}" data-action="admin-tab" data-tab="settings">⚙ Launch settings</button><button data-action="signout">↪ Sign out</button></nav></aside><section class="dashboard-content"><div class="metric-grid"><div class="metric-card"><div class="metric-top">Published products <span class="metric-symbol">▦</span></div><div class="metric-number">${published.length}</div><div class="metric-foot">Visible listings</div></div><div class="metric-card"><div class="metric-top">Shops awaiting verification <span class="metric-symbol">◷</span></div><div class="metric-number">${awaiting.length}</div><div class="metric-foot">Require your decision</div></div><div class="metric-card"><div class="metric-top">Live reports <span class="metric-symbol">⚑</span></div><div class="metric-number">${openReports.length}</div><div class="metric-foot">Open or under review</div></div><div class="metric-card"><div class="metric-top">Orders <span class="metric-symbol">▤</span></div><div class="metric-number">${orders.length}</div><div class="metric-foot">${isFirebaseConfigured()?'Stored in Firestore':'Saved in this browser'}</div></div></div>${adminTab==='products'?renderAdminProducts(all):adminTab==='orders'?renderAdminOrders(orders):adminTab==='retailers'?renderAdminRetailers(retailers):adminTab==='reports'?renderAdminReports(reports):renderAdminSettings()}</section></div></div></div>`;
+}
+function renderAdminProducts(items) {
+  return `<div class="panel-card"><div class="panel-heading"><div><h2>Product control</h2><p>Retailers publish directly after shop verification. Admin can suspend or remove listings at any time.</p></div><span class="status-pill">${items.filter(p=>p.status==='approved').length} published</span></div><div class="tabs"><button class="tab-button active" data-action="admin-list-filter" data-filter="all">All (${items.length})</button><button class="tab-button" data-action="admin-list-filter" data-filter="approved">Published</button><button class="tab-button" data-action="admin-list-filter" data-filter="suspended">Suspended</button></div><div class="table-scroll"><table><thead><tr><th>Product</th><th>Retailer</th><th>Price</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead><tbody id="admin-products-body">${items.map(adminProductRow).join('')}</tbody></table></div></div>`;
+}
+function adminProductRow(p) {
+  return `<tr data-product-status="${safe(p.status)}"><td><div class="table-product"><img src="${safe(p.image||'')}" alt="" onerror="this.style.display='none'"><div><strong>${safe(p.name)}</strong><span>${safe(categoryName(p.category))}</span></div></div></td><td>${safe(p.retailer||'Local retailer')}<div class="small-muted">${safe(p.retailerId||'')}</div></td><td>${money(p.price)} / ${safe(p.unit||'item')}</td><td>${Number(p.stock)}</td><td><span class="status-pill ${statusClass(p.status)}">${p.status==='approved'?(Number(p.stock)>0?'Published':'Sold out'):statusLabel(p.status)}</span></td><td><div class="inline-actions">${p.status==='approved'?`<button class="tiny-action danger" data-action="suspend-product" data-id="${safe(p.id)}">Suspend</button>`:`<button class="tiny-action" data-action="restore-product" data-id="${safe(p.id)}">Restore</button>`}<button class="tiny-action danger" data-action="admin-remove-product" data-id="${safe(p.id)}">Remove</button></div></td></tr>`;
+}
+function renderAdminOrders(orders) {
+  return `<div class="panel-card"><div class="panel-heading"><div><h2>Marketplace orders</h2><p>${isFirebaseConfigured()?'Orders stored in Firestore.':"Orders created in this browser's demo data."}</p></div></div>${orders.length?`<div class="table-scroll"><table><thead><tr><th>Order ID</th><th>Customer</th><th>Items</th><th>Total</th><th>Payment</th><th>Status</th></tr></thead><tbody>${orders.slice().reverse().map(o=>`<tr><td>${safe(o.id)}</td><td>${safe(o.customerName)}<div class="small-muted">${safe(o.customerEmail)}</div></td><td>${o.items.length}</td><td>${money(o.total)}</td><td>${safe(o.paymentMethod)}</td><td><span class="status-pill status-pending">${safe(o.status)}</span></td></tr>`).join('')}</tbody></table></div>`:`<p class="small-muted">No demo orders yet.</p>`}</div>`;
+}
+function renderAdminRetailers(retailers) {
+  const pending=retailers.filter(r=>r.status==='pending');
+  return `<div class="panel-card"><div class="panel-heading"><div><h2>Shop verification</h2><p>Review each shop once. Verified retailers can then publish products directly.</p></div><span class="status-pill status-pending">${pending.length} awaiting review</span></div>${retailers.length?`<div class="table-scroll"><table><thead><tr><th>Shop / contact</th><th>Contact details</th><th>Location</th><th>Open reports</th><th>Status</th><th>Actions</th></tr></thead><tbody>${retailers.map(r=>`<tr><td><strong>${safe(r.storeName)}</strong><div class="small-muted">${safe(r.contactName||'Contact not added')}</div></td><td>${safe(r.email||'—')}<div class="small-muted">${safe(r.phone||'—')}</div></td><td>${safe(r.location||'Not specified')}</td><td><strong>${openReportCount(r.ownerId || r.id)}</strong></td><td><span class="status-pill ${statusClass(r.status)}">${shopStatusLabel(r.status)}</span></td><td><div class="inline-actions">${r.status==='pending'||r.status==='rejected'?`<button class="tiny-action" data-action="verify-retailer" data-id="${safe(r.id)}">Verify shop</button><button class="tiny-action danger" data-action="reject-retailer" data-id="${safe(r.id)}">Reject</button>`:''}${r.status==='approved'?`<button class="tiny-action danger" data-action="suspend-retailer" data-id="${safe(r.id)}">Suspend</button>`:''}${r.status==='suspended'?`<button class="tiny-action" data-action="reinstate-retailer" data-id="${safe(r.id)}">Reinstate</button>`:''}${r.status!=='banned'?`<button class="tiny-action danger" data-action="ban-retailer" data-id="${safe(r.id)}">Remove / ban</button>`:''}</div></td></tr>`).join('')}</tbody></table></div>`:`<div class="empty-state"><div class="empty-state-icon">♙</div><h2>No shop applications yet</h2><p>When a retailer submits their shop profile, it will appear here for verification.</p><a class="button button-secondary" href="#seller">Open retailer sign-in</a></div>`}<p class="small-muted" style="margin-top:14px">Verification is a one-time shop-level decision; individual products do not need manual approval unless a listing is reported or restricted.</p></div>`;
+}
+function renderAdminReports(reports) {
+  const live=reports.filter(r=>['open','reviewing'].includes(r.status));
+  const grouped=new Map();
+  live.forEach(r=>{const key=r.retailerId||'unknown';if(!grouped.has(key))grouped.set(key,{retailerId:key,retailerName:r.retailerName||'Unknown retailer',reports:[]});grouped.get(key).reports.push(r);});
+  const current=activeReportFilter==='all'?reports:reports.filter(r=>activeReportFilter==='open'?['open','reviewing'].includes(r.status):r.status===activeReportFilter);
+  return `<div class="panel-card"><div class="panel-heading"><div><h2>Customer reports</h2><p>Live counts include only reports that are open or under review. Resolved and dismissed records remain in history.</p></div><span class="status-pill ${live.length?'status-pending':''}">${live.length} live reports</span></div><div class="report-summary-grid">${grouped.size?[...grouped.values()].sort((a,b)=>b.reports.length-a.reports.length).map(g=>`<button type="button" class="report-summary-card" data-action="filter-retailer-reports" data-retailer-id="${safe(g.retailerId)}"><span class="report-summary-name">${safe(g.retailerName)}</span><strong>${g.reports.length}</strong><small>open report(s) · click to inspect</small></button>`).join(''):`<div class="empty-inline"><strong>No live reports</strong><span>New product reports will appear here as soon as they are submitted.</span></div>`}</div><div class="tabs report-tabs"><button class="tab-button ${activeReportFilter==='open'?'active':''}" data-action="report-filter" data-filter="open">Live (${live.length})</button><button class="tab-button ${activeReportFilter==='resolved'?'active':''}" data-action="report-filter" data-filter="resolved">Resolved (${reports.filter(r=>r.status==='resolved').length})</button><button class="tab-button ${activeReportFilter==='dismissed'?'active':''}" data-action="report-filter" data-filter="dismissed">Dismissed (${reports.filter(r=>r.status==='dismissed').length})</button><button class="tab-button ${activeReportFilter==='all'?'active':''}" data-action="report-filter" data-filter="all">All history (${reports.length})</button></div><div class="reports-list">${current.length?current.slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).map(r=>`<article class="report-card" data-retailer-id="${safe(r.retailerId||'unknown')}"><div class="report-card-top"><div><span class="eyebrow">${safe(r.reasonLabel||r.reason)}</span><h3>${safe(r.productName||'Product report')}</h3><p>${safe(r.retailerName||'Unknown retailer')} · ${safe(r.location||'Location not provided')}</p></div><span class="status-pill ${statusClass(r.status)}">${statusLabel(r.status)}</span></div><p class="report-details">${safe(r.details||'No additional details provided.')}</p><div class="report-meta"><span>Report ID: ${safe(r.id)}</span><span>${safe(new Date(r.createdAt).toLocaleString())}</span><span>Reporter: ${safe(r.reporterName||'Guest')}${r.reporterContact?` · ${safe(r.reporterContact)}`:''}</span></div><div class="report-actions">${r.status==='open'?`<button class="tiny-action" data-action="review-report" data-id="${safe(r.id)}">Mark reviewing</button>`:''}${['open','reviewing'].includes(r.status)?`<button class="tiny-action" data-action="resolve-report" data-id="${safe(r.id)}">Resolve report</button><button class="tiny-action danger" data-action="dismiss-report" data-id="${safe(r.id)}">Dismiss</button>`:''}<button class="tiny-action danger" data-action="suspend-reported-product" data-id="${safe(r.productId)}">Suspend product</button><button class="tiny-action danger" data-action="suspend-reported-retailer" data-id="${safe(r.retailerId)}">Suspend retailer</button></div></article>`).join(''):`<div class="empty-inline"><strong>No reports in this view</strong><span>Select another filter or return to the live reports view.</span></div>`}</div></div>`;
+}
+function renderAdminSettings() {
+  return `<div class="panel-card"><div class="panel-heading"><div><h2>Launch checklist</h2><p>Configuration required before Pashughar handles real users and transactions.</p></div></div><div class="notice notice-warn">This panel is available only to an account with the trusted Firebase admin custom claim.</div>${[['Firebase Authentication','Google and email/password sign-in are wired to Firebase Authentication.'],['Shop verification','Firestore Rules restrict verification controls to the trusted admin claim.'],['Product images','Firebase Storage is disabled; provide public HTTPS image URLs.'],['Customer reports','Requires the included callable function deployment for private submissions and moderation.'],['Orders and stock','Requires the callable function deployment for transactional stock validation.'],['Payments and delivery','Only offline/COD arrangements are available; online payments are not integrated.'],['Production launch','Set the admin claim, deploy Firestore rules, test access boundaries, and publish legal/support policies.']].map(([title,desc],i)=>`<div style="display:flex;gap:12px;padding:15px 0;border-bottom:1px solid var(--line)"><div class="step-number" style="flex-shrink:0">${i+1}</div><div><strong style="font-size:12px">${title}</strong><p class="small-muted" style="margin:5px 0 0">${desc}</p></div></div>`).join('')}<p class="small-muted" style="margin-top:18px">Firebase web configuration present: ${isFirebaseConfigured()?'Yes — test on the deployed site before real launch':'No — add your web app configuration in js/firebase.js'}.</p></div>`;
+}
+
+function renderWishlist() {
+  const ids=store.wishlist();const products=ids.map(getProduct).filter(Boolean);
+  app.innerHTML=`<div class="page-wrap"><div class="container"><div class="page-title-row"><div><div class="eyebrow">Saved for later</div><h1>Your wishlist</h1><p>Keep the products you may want to order.</p></div></div>${products.length?`<div class="product-grid">${products.map(productCard).join('')}</div>`:emptyState('♡','No saved products yet','Tap the heart on any product to save it here.','#shop','Browse products')}</div></div>`;
+}
+function renderSimplePage(path) {
+  const content={
+    about:['About Pashughar','Pashughar is a marketplace concept designed to bring livestock, meat and poultry, pets & supplies, animal products, and animal-care essentials together in one place. Our goal is to make product discovery easier while helping retailers organize listings and stock.'],
+    contact:['Contact support','For this prototype, customer support contact information has not yet been configured. Add your business email, telephone number, service hours, and support workflow before launch.'],
+    privacy:['Privacy policy','This prototype stores demo session details, sample orders, product listings, and cart data in local browser storage. That is not a production privacy or data-security arrangement. Publish a legally reviewed privacy policy covering account information, orders, seller verification, payments, retention, and user rights before collecting real customer data.'],
+    terms:['Terms & conditions','Marketplace terms should define retailer responsibilities, product accuracy, fulfilment, cancellations, returns, refunds, commissions, disputes, prohibited listings, and customer responsibilities. Obtain appropriate legal review for every location where Pashughar will operate before launch.']
+  }[path]||['Page not found','The requested page is not available. Return to the marketplace and continue browsing.'];
+  app.innerHTML=`<div class="simple-page"><div class="container"><article><div class="eyebrow">Pashughar information</div><h1>${content[0]}</h1><p>${content[1]}</p><a class="button button-primary" href="#home">Back to home</a></article></div></div>`;
+}
+function updateCartCount(){const el=document.getElementById('cart-count');if(el)el.textContent=cartCount();}
+function scrollTop(){window.scrollTo({top:0,behavior:'instant'});}
+function render() {
+  const {path,params}=getRoute();
+  delete app.dataset.sectionTheme;
+  document.querySelectorAll('.nav-inner a').forEach(a=>a.classList.toggle('current',a.getAttribute('href')===`#${path}`));
+  if(path==='home')renderHome();
+  else if(path==='shop') { activeShopQuery=params.get('q')??''; activeShopCategory=params.get('category')??''; renderShop(params); }
+  else if(path.startsWith('product/'))renderProduct(decodeURIComponent(path.slice(8)));
+  else if(path==='cart')renderCart();
+  else if(path==='account') { navigate('#shop'); renderShop(new URLSearchParams()); }
+  else if(path==='seller') { if(session()?.role==='retailer')renderSellerDashboard(); else renderRetailerLogin(); }
+  else if(path==='admin') { if(session()?.role==='admin')renderAdmin(); else renderAdminLogin(); }
+  else if(path==='wishlist')renderWishlist();
+  else renderSimplePage(path);
+  updateCartCount();
+}
+function navigate(hash){location.hash=hash;}
+function addToCart(id, qty=1){
+  const product=getProduct(id);if(!product||product.status!=='approved')return showToast('This product is not available to purchase.','error');
+  if(!isAvailable(product))return showToast('This product is sold out.','warn');
+  const cart=store.cart();const existing=cart.find(i=>i.id===id);const requested=(existing?Number(existing.qty):0)+Number(qty);
+  if(requested>Number(product.stock))return showToast(`Only ${product.stock} ${product.unit||'unit'}${Number(product.stock)===1?'':'s'} available.`,'warn');
+  if(existing)existing.qty=requested;else cart.push({id,qty:Number(qty)});
+  store.saveCart(cart);updateCartCount();showToast(`${product.name} added to your cart.`);
+}
+function updateCartQty(id, delta){const cart=store.cart();const item=cart.find(i=>i.id===id);const p=getProduct(id);if(!item||!p)return;if(delta>0&&item.qty>=Number(p.stock))return showToast('No more stock is available.','warn');item.qty+=delta;if(item.qty<=0){store.saveCart(cart.filter(i=>i.id!==id));}else{store.saveCart(cart);}renderCart();}
+function toggleWishlist(id){const list=store.wishlist();if(list.includes(id)){store.saveWishlist(list.filter(i=>i!==id));showToast('Removed from your wishlist.');}else{store.saveWishlist([...list,id]);showToast('Saved to your wishlist.');}render();}
+function openProductForm(product=null){
+  const user=session();if(!user || user.role!=='retailer')return showToast('Sign in to the retailer workspace first.','warn');const profile=retailerProfile(user);if(!profile||profile.status!=='approved'){if(profile)renderRetailerVerificationState(user,profile);else renderSellerSetup(user);return showToast('Your shop must be verified before publishing products.','warn');}
+  const p=product||{};if(product&&!(p.retailerId===user.uid||(user.uid==='demo-retailer'&&p.retailerId==='retailer-demo')))return showToast('You can only edit your own listings.','error');
+  currentProductImages=(Array.isArray(p.images)&&p.images.length?p.images:[p.image]).filter(Boolean).slice(0,5);activeProductImageIndex=0;
+  const imageUrls=currentProductImages.filter(x=>!String(x).startsWith('data:')).join('\n');
+  modalContent.innerHTML=`<div class="modal-inner"><div class="modal-head"><div><h2>${product?'Edit listing':'Add a product'}</h2><p>Verified retailers can publish directly. Add accurate details and up to five product photos or hosted image URLs.</p></div><button class="modal-close" data-action="close-modal" aria-label="Close">×</button></div><form id="product-form" data-id="${safe(p.id||'')}"><div class="field"><label for="pf-name">Product name *</label><input id="pf-name" name="name" required maxlength="120" value="${safe(p.name||'')}" placeholder="e.g. Fresh farm eggs"></div><div class="field-grid"><div class="field"><label for="pf-category">Category *</label><select id="pf-category" name="category" required>${CATEGORIES.map(c=>`<option value="${c.id}" ${normalizeCategoryId(p.category)===c.id?'selected':''}>${c.name}</option>`).join('')}</select></div><div class="field"><label for="pf-condition">Product type / condition</label><input id="pf-condition" name="condition" value="${safe(p.condition||'New')}" placeholder="Fresh, new, live animal"></div></div><div class="field"><label for="pf-description">Description *</label><textarea id="pf-description" name="description" required maxlength="2500" placeholder="Describe the product clearly">${safe(p.description||'')}</textarea></div><div class="field-grid"><div class="field"><label for="pf-price">Price in NPR *</label><input id="pf-price" name="price" type="number" required min="0.01" max="100000000" step="0.01" value="${safe(p.price??'')}" placeholder="e.g. 750"></div><div class="field"><label for="pf-unit">Selling unit *</label><select id="pf-unit" name="unit" required>${['piece','kg','g','litre','ml','dozen','pack','bag','animal','pair','box'].map(u=>`<option value="${u}" ${p.unit===u?'selected':''}>${u}</option>`).join('')}</select></div></div><div class="field-grid"><div class="field"><label for="pf-stock">Available quantity *</label><input id="pf-stock" name="stock" type="number" required min="0" max="1000000" step="1" value="${safe(p.stock??0)}"></div><div class="field"><label for="pf-location">Location / service area *</label><input id="pf-location" name="location" required maxlength="220" value="${safe(p.location||profile.location||'Pokhara, Nepal')}" placeholder="City / district"></div></div><div class="field"><label for="pf-images">Upload product photos (up to 5)</label><input id="pf-images" name="images" type="file" accept="image/jpeg,image/png,image/webp,image/avif" multiple ${isFirebaseConfigured()?"disabled":""}><span class="small-muted">${isFirebaseConfigured()?"Firebase Storage is disabled. Use public HTTPS image URLs below; uploads are unavailable in this version.":"Photos are resized in your browser and stored locally in this prototype."}</span><div id="pf-image-preview" class="uploaded-image-grid">${currentProductImages.map((src,i)=>`<div><img src="${safe(src)}" alt="Product photo ${i+1}"><button type="button" data-action="remove-product-image" data-index="${i}" aria-label="Remove image">×</button></div>`).join('')}</div></div><div class="field"><label for="pf-image-urls">Or add image URLs (one per line)</label><textarea id="pf-image-urls" name="imageUrls" rows="2" placeholder="https://example.com/product-photo.jpg">${safe(imageUrls)}</textarea></div><div class="field-grid"><div class="field"><label for="pf-attr1">Specification label</label><input id="pf-attr1" name="attr1" value="${safe(Object.keys(p.attributes||{})[0]||'')}" placeholder="e.g. Breed / Weight"></div><div class="field"><label for="pf-attrv1">Specification value</label><input id="pf-attrv1" name="attrv1" value="${safe(Object.values(p.attributes||{})[0]||'')}" placeholder="e.g. Local cross"></div></div><div class="notice notice-info">Stock zero automatically shows <strong>SOLD OUT</strong>. Your listing will become visible as soon as you publish it.</div><div class="modal-actions"><button type="button" class="button button-secondary" data-action="close-modal">Cancel</button><button type="submit" class="button button-primary">${product?'Save changes':'Publish product'} →</button></div></form></div>`;
+  if(typeof modal.showModal==='function')modal.showModal();else modal.setAttribute('open','');
+}
+
+function closeModal(){if(modal.open)modal.close();else modal.removeAttribute('open');}
+function submitProduct(form){
+  const data=new FormData(form);const name=String(data.get('name')||'').trim();const desc=String(data.get('description')||'').trim();const price=Number(data.get('price'));const stock=Number(data.get('stock'));
+  const user=session();const profile=retailerProfile(user);if(!user||user.role!=='retailer'||!profile||profile.status!=='approved')return showToast('Only verified retailers can publish products.','error');
+  if(!name||name.length>120||!desc||desc.length>2500||!Number.isFinite(price)||price<=0||price>100000000||!Number.isInteger(stock)||stock<0||stock>1000000)return showToast('Check the product name, description, price and whole-number stock limits.','error');
+  const products=allProducts();const id=form.dataset.id;const existing=id?products.find(p=>p.id===id):null;
+  if(existing&&!(existing.retailerId===user.uid||(user.uid==='demo-retailer'&&existing.retailerId==='retailer-demo')))return showToast('You can only edit your own listings.','error');
+  const attrs={};if(String(data.get('attr1')||'').trim()&&String(data.get('attrv1')||'').trim())attrs[String(data.get('attr1')).trim()]=String(data.get('attrv1')).trim();
+  const rawImageUrls=String(data.get('imageUrls')||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  const urlImages=rawImageUrls.filter(x=>{try{const u=new URL(x);return u.protocol==='https:' && Boolean(u.hostname);}catch{return false;}});
+  if(rawImageUrls.length!==urlImages.length)return showToast('Each image must be a valid HTTPS URL. Firebase Storage is disabled in this version.','error');
+  if(rawImageUrls.length>5)return showToast('Add no more than five image URLs.','error');
+  const localImages=isFirebaseConfigured()?[]:currentProductImages.filter(x=>String(x).startsWith('data:'));
+  const preservedImages=!isFirebaseConfigured()&&existing&&Array.isArray(existing.images)?existing.images.filter(x=>String(x).startsWith('data:')):[];
+  const images=[...new Set([...urlImages,...localImages,...preservedImages])].slice(0,5);
+  const primary=images[0]||existing?.image||'https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=700&q=80';
+  const entry={...(existing||{}),id:id||slugId(),name,category:normalizeCategoryId(String(data.get('category'))),condition:String(data.get('condition')||'New'),description:desc,price,unit:String(data.get('unit')),stock,location:String(data.get('location')||'Nepal').trim(),image:primary,images:images.length?images:[primary],attributes:attrs,retailer:profile.storeName,retailerId:user.uid,status:'approved',createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
+  const saveResult = store.saveProducts(existing?products.map(p=>p.id===id?entry:p):[entry,...products]);
+  if (isFirebaseConfigured()) {
+    showToast('Saving product to Firestore…');
+    Promise.resolve(saveResult).then(()=>{closeModal();renderSellerDashboard();showToast(existing?'Listing updated and published.':'Product published to the marketplace.');}).catch(()=>{});
+    return;
+  }
+  closeModal();renderSellerDashboard();showToast(existing?'Listing updated and published.':'Product published to the marketplace.');
+}
+
+function openReportForm(productId){
+  const p=getProduct(productId);if(!p)return showToast('This listing is no longer available.','error');
+  modalContent.innerHTML=`<div class="modal-inner"><div class="modal-head"><div><div class="eyebrow">Marketplace safety</div><h2>Report this listing</h2><p>Report a specific concern so Pashughar can review the retailer and product.</p></div><button class="modal-close" data-action="close-modal" aria-label="Close">×</button></div><form id="report-form" data-product-id="${safe(p.id)}"><div class="reported-product-mini"><img src="${safe(p.image||'')}" alt="" onerror="this.style.display='none'"><div><strong>${safe(p.name)}</strong><span>${safe(p.retailer||'Local retailer')}</span></div></div><div class="field"><label for="report-reason">What is the issue? *</label><select id="report-reason" name="reason" required><option value="">Select a reason</option><option value="suspected-scam">Suspected scam or fraud</option><option value="misleading-listing">Misleading description or price</option><option value="fake-product">Fake or misrepresented product</option><option value="non-delivery">Order not delivered</option><option value="animal-welfare">Animal welfare concern</option><option value="prohibited-item">Prohibited or unsafe listing</option><option value="other">Other concern</option></select></div><div class="field"><label for="report-details">Tell us what happened *</label><textarea id="report-details" name="details" required minlength="10" maxlength="1800" placeholder="Provide dates, order reference (if any), and a clear description. Do not include passwords or payment credentials."></textarea></div><div class="field-grid"><div class="field"><label for="reporter-name">Your name (optional)</label><input id="reporter-name" name="reporterName" maxlength="100" placeholder="Name"></div><div class="field"><label for="reporter-contact">Contact (optional)</label><input id="reporter-contact" name="reporterContact" maxlength="150" placeholder="Email or phone for follow-up"></div></div><div class="notice notice-info">Reports are reviewed by Pashughar. A report is an allegation, not proof that a retailer has done something wrong.</div><div class="modal-actions"><button type="button" class="button button-secondary" data-action="close-modal">Cancel</button><button type="submit" class="button button-primary">Submit report</button></div></form></div>`;
+  if(typeof modal.showModal==='function')modal.showModal();else modal.setAttribute('open','');
+}
+function submitReport(form){
+  const data=new FormData(form);const p=getProduct(form.dataset.productId);if(!p)return showToast('This product was removed before the report could be submitted.','error');
+  const reason=String(data.get('reason')||'').trim();const details=String(data.get('details')||'').trim();if(!reason||details.length<10)return showToast('Choose a reason and provide at least 10 characters of detail.','error');
+  const reporterContact=String(data.get('reporterContact')||'').trim();const reporterName=String(data.get('reporterName')||'').trim();
+  if(isFirebaseConfigured()){callCloudFunction('submitReport',{productId:p.id,reason,details,reporterName,reporterContact},'Report submitted to Pashughar for review.').then(()=>closeModal()).catch(()=>{});return;}
+  const reports=store.reports();
+  if(reporterContact&&reports.some(r=>r.productId===p.id&&r.reporterContact?.toLowerCase()===reporterContact.toLowerCase()&&r.reason===reason&&['open','reviewing'].includes(r.status)))return showToast('A similar report from this contact is already open.','warn');
+  const reasonLabel=({ 'suspected-scam':'Suspected scam or fraud','misleading-listing':'Misleading description or price','fake-product':'Fake or misrepresented product','non-delivery':'Order not delivered','animal-welfare':'Animal welfare concern','prohibited-item':'Prohibited or unsafe listing','other':'Other concern'})[reason]||reason;
+  const report={id:slugId(),productId:p.id,productName:p.name,retailerId:p.retailerId||'unknown',retailerName:p.retailer||'Unknown retailer',location:p.location||'Not specified',category:p.category,reason,reasonLabel,details,reporterName:reporterName||'Guest shopper',reporterContact,status:'open',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};
+  store.saveReports([report,...reports]);closeModal();showToast('Report submitted. Pashughar can now review it.');
+}
+async function shrinkImage(file){
+  if(!file||!String(file.type).startsWith('image/'))throw new Error('Choose an image file.');
+  if(file.size>10*1024*1024)throw new Error('Each original image must be under 10 MB.');
+  const bitmap=await createImageBitmap(file);const scale=Math.min(1,1200/Math.max(bitmap.width,bitmap.height));const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));const ctx=canvas.getContext('2d');ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close?.();
+  let data=canvas.toDataURL('image/webp',0.78);if(!data.startsWith('data:image/webp'))data=canvas.toDataURL('image/jpeg',0.78);return data;
+}
+function renderProductImagePreview(){const preview=document.getElementById('pf-image-preview');if(!preview)return;const urls=(document.getElementById('pf-image-urls')?.value||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);const local=currentProductImages.filter(x=>String(x).startsWith('data:'));const all=[...urls,...local].slice(0,5);preview.innerHTML=all.map((src,i)=>`<div><img src="${safe(src)}" alt="Product photo ${i+1}"><span>${i+1}</span></div>`).join('');}
+function submitCheckout(form){
+  const data=new FormData(form);const cart=store.cart();if(!cart.length)return showToast('Your cart is empty.','error');
+  for(const item of cart){const p=getProduct(item.id);if(!p||p.status!=='approved'||!isAvailable(p)||Number(item.qty)>Number(p.stock))return showToast('One or more items are no longer available in the requested quantity. Review your cart.','error');}
+  const name=String(data.get('name')||'').trim(), phone=String(data.get('phone')||'').trim(), address=String(data.get('address')||'').trim(), city=String(data.get('city')||'').trim(), notes=String(data.get('notes')||'').trim();
+  if(!name||!phone||!address||!city)return showToast('Complete your name, phone, address and city.','error');
+  if(isFirebaseConfigured()){
+    const paymentMethod=data.get('payment')==='cod'?'cod':'contact_seller';
+    const submitButton=form.querySelector('button[type="submit"]');
+    if (submitButton?.disabled) return;
+    if (submitButton) { submitButton.disabled = true; submitButton.textContent = 'Submitting order…'; }
+    callCloudFunction('createOrder',{clientRequestId:form.dataset.requestId || slugId(),items:cart.map(i=>({productId:i.id,quantity:Number(i.qty)})),shipping:{name,phone,address,city,email:session()?.email||'',notes},paymentMethod})
+      .then(result=>{
+        store.saveCart([]);
+        app.innerHTML=`<div class="page-wrap"><div class="container"><section class="panel-card status-hero"><div class="symbol">✓</div><div class="eyebrow" style="justify-content:center">Order submitted</div><h2>Thank you, ${safe(name)}.</h2><p>Your order <strong>${safe(result.orderId)}</strong> has been saved. No online payment has been taken; payment is ${paymentMethod==='cod'?'cash on delivery':'to be arranged with the retailer'}.</p><div style="font:800 23px Manrope;margin:15px 0">${money(result.total)}</div><span class="status-pill status-pending">Pending</span><div class="hero-actions" style="justify-content:center;margin-top:20px"><a href="#shop" class="button button-primary">Browse products</a><a href="#home" class="button button-secondary">Home</a></div></section></div></div>`;
+        updateCartCount();window.scrollTo({top:0,behavior:'smooth'});
+      }).catch(()=>{ if (submitButton) { submitButton.disabled = false; submitButton.textContent = `Place order · ${money(cartTotals(cart).subtotal)} →`; } });
+    return;
+  }
+  const totals=cartTotals(cart);const customer=session();const order={id:`PG-${new Date().getFullYear()}-${Math.random().toString(36).slice(2,8).toUpperCase()}`,customerName:name,customerEmail:customer?.email||'guest@pashughar.demo',phone,address,city,notes,paymentMethod:data.get('payment')==='cod'?'Cash on delivery (demo)':'Contact retailer (demo)',status:'Pending',items:cart.map(i=>({id:i.id,qty:Number(i.qty),price:Number(getProduct(i.id).price),retailerId:getProduct(i.id).retailerId})),subtotal:totals.subtotal,total:totals.total,createdAt:new Date().toISOString(),demo:true};
+  const products=allProducts().map(p=>{const item=cart.find(i=>i.id===p.id);return item?{...p,stock:Math.max(0,Number(p.stock)-Number(item.qty))}:p;});
+  store.saveProducts(products);store.saveOrders([...store.orders(),order]);store.saveCart([]);
+  app.innerHTML=`<div class="page-wrap"><div class="container"><div class="panel-card status-hero"><div class="symbol">✓</div><div class="eyebrow" style="justify-content:center">Demo order created</div><h2>Thank you, ${safe(order.customerName)}.</h2><p>Your local demo order <strong>${safe(order.id)}</strong> has been recorded in this browser. No real payment has been taken and no retailer has been notified.</p><div style="font:800 23px Manrope;margin:15px 0">${money(order.total)}</div><span class="status-pill status-pending">${safe(order.status)}</span><p style="margin-top:16px">This is a local demo order only.</p><div class="hero-actions" style="justify-content:center"><a href="#shop" class="button button-primary">Browse products</a><a href="#shop" class="button button-secondary">Continue shopping</a></div></div></div></div>`;
+  updateCartCount();window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function firebaseErrorMessage(error) {
+  const code = String(error?.code || '');
+  const messages = {
+    'auth/invalid-credential':'Email or password is incorrect.',
+    'auth/user-not-found':'No account was found for this email.',
+    'auth/wrong-password':'Email or password is incorrect.',
+    'auth/email-already-in-use':'An account already uses this email. Sign in instead.',
+    'auth/weak-password':'Choose a stronger password with at least 6 characters.',
+    'auth/popup-closed-by-user':'The Google sign-in window was closed before signing in.',
+    'auth/unauthorized-domain':'This website domain is not authorized in Firebase Authentication.',
+    'permission-denied':'Firestore rejected this change. Confirm the security rules and account permissions.',
+    'functions/not-found':'This server function is not deployed yet. No change was made.',
+    'functions/failed-precondition':'The requested action is not available for the current account or listing.'
+  };
+  return messages[code] || error?.message || 'Firebase operation failed. No success was assumed.';
+}
+function callCloudFunction(name, payload, successMessage) {
+  return getCallable(name)(payload).then(result => {
+    if (successMessage) showToast(successMessage);
+    return result.data;
+  }).catch(error => { showToast(firebaseErrorMessage(error), 'error'); throw error; });
+}
+function endDemoSession() {
+  if (isFirebaseConfigured()) {
+    signOutUser().catch(error => showToast(firebaseErrorMessage(error), 'error'));
+    return;
+  }
+  const role = session()?.role;
+  store.saveSession(null);
+  if (role === 'admin') { navigate('#admin'); if (getRoute().path === 'admin') render(); }
+  else if (role === 'retailer') { navigate('#seller'); if (getRoute().path === 'seller') render(); }
+  else { navigate('#home'); if (getRoute().path === 'home') render(); }
+}
+
+// Shared event delegation keeps page templates simple.
+document.addEventListener('click',e=>{
+  const actionEl=e.target.closest('[data-action]');
+  if(!actionEl)return;
+  const action=actionEl.dataset.action;const id=actionEl.dataset.id;
+  if(action==='toggle-theme'){applyTheme(document.body.dataset.theme==='dark'?'light':'dark',true);}
+  else if(action==='google-signin'){if(!isFirebaseConfigured())return showToast('Firebase is not configured.','warn');signInGoogle().then(()=>showToast('Signed in with Google.')).catch(error=>showToast(firebaseErrorMessage(error),'error'));}
+  else if(action==='password-reset'){const prefix=getRoute().path==='admin'?'admin-login':'retailer-login';const email=document.getElementById(`${prefix}-email`)?.value?.trim();if(!email)return showToast('Enter your email address first, then select Forgot password.','warn');resetEmailPassword(email).then(()=>showToast('Password reset email sent.')).catch(error=>showToast(firebaseErrorMessage(error),'error'));}
+  else if(action==='add-cart'){addToCart(id);}
+  else if(action==='wishlist'){toggleWishlist(id);}
+  else if(action==='remove-cart'){store.saveCart(store.cart().filter(i=>i.id!==id));renderCart();updateCartCount();showToast('Item removed from cart.');}
+  else if(action==='cart-minus'){updateCartQty(id,-1);}
+  else if(action==='cart-plus'){updateCartQty(id,1);}
+  else if(action==='detail-add'){const qty=Math.max(1,Math.floor(Number(document.getElementById('detail-qty')?.value||1)));addToCart(id,qty);}
+  else if(action==='set-product-image'){activeProductImageIndex=Math.max(0,Number(actionEl.dataset.index)||0);renderProduct(id);}
+  else if(action==='report-product'){openReportForm(id);}
+  else if(action==='edit-shop-registration'){const user=session();if(user)renderSellerSetup(user);}
+  else if(action==='qty-minus'){const el=document.getElementById('detail-qty');if(el)el.value=Math.max(1,Number(el.value)-1);}
+  else if(action==='qty-plus'){const el=document.getElementById('detail-qty');if(el)el.value=Math.min(Number(el.max),Number(el.value)+1);}
+  else if(action==='go-checkout'){renderCheckout();}
+  else if(action==='toggle-filters'){activeShopFiltersVisible=!activeShopFiltersVisible;document.getElementById('filter-panel')?.classList.toggle('filters-open',activeShopFiltersVisible);}
+  else if(action==='reset-filters'){activeShopCategory='';activeShopQuery='';activeShopStockOnly=false;activeShopSort='featured';renderShop(new URLSearchParams());}
+  else if(action==='open-demo-retailer'){navigate('#seller');}
+  else if(action==='seller-new-product'){const user=session();if(user?.role!=='retailer')return showToast('Sign in to the retailer workspace first.','warn');const profile=retailerProfile(user);if(!profile)return renderSellerSetup(user);if(profile.status!=='approved')return renderRetailerVerificationState(user,profile);openProductForm();}
+  else if(action==='edit-product'){const p=getProduct(id);if(p&&p.retailerId===session()?.uid)openProductForm(p);else if(p&&session()?.uid==='demo-retailer'&&p.retailerId==='retailer-demo')openProductForm(p);else showToast('You can only edit your own listings.','error');}
+  else if(action==='delete-product'){const p=getProduct(id);if(!p)return;const user=session();if(!(p.retailerId===user?.uid||(user?.uid==='demo-retailer'&&p.retailerId==='retailer-demo')))return showToast('You can only remove your own listings.','error');if(!confirm(`Remove “${p.name}” from ${isFirebaseConfigured()?'the marketplace':'your demo catalogue'}?`))return;const saveResult=store.saveProducts(allProducts().filter(x=>x.id!==id));if(isFirebaseConfigured()){showToast('Removing listing…');Promise.resolve(saveResult).then(()=>{renderSellerDashboard();showToast('Listing removed.');}).catch(()=>{});}else{renderSellerDashboard();showToast('Listing removed from this browser.');}}
+  else if(action==='close-modal'){closeModal();}
+  else if(action==='remove-product-image'){const index=Number(actionEl.dataset.index);const src=currentProductImages[index];if(src&&String(src).startsWith('data:'))currentProductImages=currentProductImages.filter((x,i)=>i!==index);else if(src){const field=document.getElementById('pf-image-urls');if(field){const lines=field.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);const urlIndex=currentProductImages.slice(0,index).filter(x=>!String(x).startsWith('data:')).length;lines.splice(urlIndex,1);field.value=lines.join('\n');}currentProductImages=currentProductImages.filter((x,i)=>i!==index);}renderProductImagePreview();}
+  else if(action==='seller-tab'){sellerTab=actionEl.dataset.tab;renderSellerDashboard();}
+  else if(action==='admin-tab'){adminTab=actionEl.dataset.tab;renderAdmin();}
+  else if(action==='suspend-product'||action==='restore-product'||action==='admin-remove-product'){
+    if(isFirebaseConfigured()){if(action==='admin-remove-product'&&!confirm('Permanently remove this listing? Report history will remain.'))return;const p=getProduct(id);if(!p)return;const operation=action==='admin-remove-product'?removeProductDirect({productId:id}):moderateProductDirect({productId:id,decision:action==='suspend-product'?'suspended':'approved',reason:'Admin action from Pashughar dashboard'});operation.then(()=>{showToast(action==='admin-remove-product'?'Product removed.':action==='suspend-product'?'Product suspended.':'Product restored.');renderAdmin();}).catch(error=>showToast(firebaseErrorMessage(error),'error'));return;}
+    const products=allProducts();const p=products.find(x=>x.id===id);if(!p)return;
+    if(action==='admin-remove-product'){
+      if(!confirm(`Permanently remove “${p.name}” from this demo catalogue? Report history will remain.`))return;
+      store.saveProducts(products.filter(x=>x.id!==id));
+      renderAdmin();showToast('Product removed from the demo catalogue.');
+    } else {
+      p.status=action==='suspend-product'?'suspended':'approved';p.adminActionAt=new Date().toISOString();store.saveProducts(products);renderAdmin();showToast(action==='suspend-product'?'Product suspended.':'Product restored.');
+    }
+  }
+  else if(action==='verify-retailer'||action==='reject-retailer'||action==='suspend-retailer'||action==='reinstate-retailer'||action==='ban-retailer'){
+    if(isFirebaseConfigured()){const r=store.retailers().find(x=>x.id===id);if(!r)return;const decision=action==='verify-retailer'||action==='reinstate-retailer'?'approved':action==='reject-retailer'?'rejected':action==='suspend-retailer'?'suspended':'banned';if(action==='ban-retailer'&&!confirm(`Remove / ban ${r.storeName}? Its listing history will be retained.`))return;moderateRetailerDirect({retailerId:r.ownerId||r.id,decision,reason:'Admin action from Pashughar dashboard'}).then(()=>{showToast(`Shop status changed to ${decision}.`);renderAdmin();}).catch(error=>showToast(firebaseErrorMessage(error),'error'));return;}
+    const retailers=store.retailers();const r=retailers.find(x=>x.id===id);if(!r)return;
+    let next=r.status;
+    if(action==='verify-retailer')next='approved';
+    else if(action==='reject-retailer')next='rejected';
+    else if(action==='suspend-retailer')next='suspended';
+    else if(action==='reinstate-retailer')next='approved';
+    else if(action==='ban-retailer')next='banned';
+    if(action==='ban-retailer'&&!confirm(`Remove / ban ${r.storeName}? Its listings will be hidden, but the history will remain.`))return;
+    r.status=next;r.updatedAt=new Date().toISOString();
+    const products=allProducts().map(p=>{
+      const linked=p.retailerId===r.ownerId||p.retailerId===r.id;
+      if(!linked)return p;
+      if(['suspended','banned','rejected'].includes(next)&&p.status==='approved')return {...p,status:'suspended',suspensionCause:'retailer'};
+      if(next==='approved'&&p.status==='suspended'&&p.suspensionCause==='retailer'){const copy={...p,status:'approved'};delete copy.suspensionCause;return copy;}
+      return p;
+    });
+    store.saveRetailers(retailers);store.saveProducts(products);renderAdmin();showToast(next==='approved'?'Shop verified. Retailer can now publish products directly.':`Shop status changed to ${next}.`);
+  }
+  else if(action==='review-report'||action==='resolve-report'||action==='dismiss-report'){
+    if(isFirebaseConfigured()){const decision=action==='review-report'?'reviewing':action==='resolve-report'?'resolved':'dismissed';const resolutionNote=action==='dismiss-report'?(prompt('Optional reason for dismissing this report:','Insufficient evidence / duplicate report')||'Dismissed by admin'):action==='resolve-report'?(prompt('Resolution note (optional):','Reviewed and actioned')||'Reviewed and actioned'):'';callCloudFunction('moderateReport',{reportId:id,decision,resolutionNote},`Report marked ${decision}.`).then(()=>renderAdmin()).catch(()=>{});return;}
+    const reports=store.reports();const report=reports.find(r=>r.id===id);if(!report)return;
+    report.status=action==='review-report'?'reviewing':action==='resolve-report'?'resolved':'dismissed';report.updatedAt=new Date().toISOString();report.reviewedBy='demo-admin';
+    if(action==='dismiss-report'){report.resolutionNote=prompt('Optional reason for dismissing this report:','Insufficient evidence / duplicate report')||'Dismissed by admin';}
+    else if(action==='resolve-report'){report.resolutionNote=prompt('Resolution note (optional):','Reviewed and actioned')||'Reviewed and actioned';}
+    store.saveReports(reports);renderAdmin();showToast(`Report marked ${report.status}.`);
+  }
+  else if(action==='suspend-reported-product'){
+    if(isFirebaseConfigured()){moderateProductDirect({productId:id,decision:'suspended',reason:'Suspended following customer report; review separately'}).then(()=>{showToast('Reported product suspended.');renderAdmin();}).catch(error=>showToast(firebaseErrorMessage(error),'error'));return;}
+    const products=allProducts();const p=products.find(x=>x.id===id);if(!p)return showToast('The product may already have been removed.','warn');p.status='suspended';p.suspensionCause='admin-report';p.adminActionAt=new Date().toISOString();store.saveProducts(products);renderAdmin();showToast('Reported product suspended and hidden from shoppers.');
+  }
+  else if(action==='suspend-reported-retailer'){
+    if(isFirebaseConfigured()){moderateRetailerDirect({retailerId:id,decision:'suspended',reason:'Suspended following customer report; review separately'}).then(()=>{showToast('Retailer suspended.');renderAdmin();}).catch(error=>showToast(firebaseErrorMessage(error),'error'));return;}
+    const retailers=store.retailers();const r=retailers.find(x=>x.ownerId===id||x.id===id);if(!r)return showToast('No retailer profile found for this listing.','warn');r.status='suspended';r.updatedAt=new Date().toISOString();const products=allProducts().map(p=>{if((p.retailerId===r.ownerId||p.retailerId===r.id)&&p.status==='approved')return {...p,status:'suspended',suspensionCause:'retailer'};return p;});store.saveRetailers(retailers);store.saveProducts(products);renderAdmin();showToast('Retailer suspended; their listings are hidden.');
+  }
+  else if(action==='report-filter'){activeReportFilter=actionEl.dataset.filter||'open';renderAdmin();}
+  else if(action==='filter-retailer-reports'){const retailerId=actionEl.dataset.retailerId;activeReportFilter='open';renderAdmin();document.querySelectorAll('.report-card').forEach(card=>{card.hidden=card.dataset.retailerId!==retailerId;});}
+  else if(action==='admin-list-filter'){document.querySelectorAll('[data-action="admin-list-filter"]').forEach(b=>b.classList.toggle('active',b===actionEl));document.querySelectorAll('#admin-products-body tr').forEach(row=>row.hidden=actionEl.dataset.filter!=='all'&&row.dataset.productStatus!==actionEl.dataset.filter);}
+  else if(action==='signout'){endDemoSession();showToast('You have signed out.');}
+  else if(action==='reset-demo'){if(confirm('Reset all locally saved Pashughar demo data to the original sample state?')){store.resetDemo();sellerTab='products';adminTab='products';renderAdmin();showToast('Demo data reset.');}}
+});
+
+document.addEventListener('change',async e=>{
+  const el=e.target;
+  if(el.id==='pf-images'){
+    if(isFirebaseConfigured()){showToast('Firebase Storage is disabled. Add HTTPS image URLs instead.','warn');el.value='';return;}
+    const files=Array.from(el.files||[]);if(!files.length)return;const currentLocal=currentProductImages.filter(x=>String(x).startsWith('data:'));const currentUrls=(document.getElementById('pf-image-urls')?.value||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);const remaining=Math.max(0,5-currentUrls.length-currentLocal.length);if(files.length>remaining){showToast(`You can add only ${remaining} more image(s).`,'warn');el.value='';return;}try{for(const file of files){const resized=await shrinkImage(file);currentProductImages.push(resized);}currentProductImages=currentProductImages.slice(-5);renderProductImagePreview();showToast('Product photo(s) added and compressed.');}catch(error){showToast(error.message||'Could not process that image.','error');}el.value='';return;
+  }
+  if(el.id==='pf-image-urls'){renderProductImagePreview();return;}
+  if(el.name==='category-filter'){activeShopCategory=el.value;renderShop(new URLSearchParams());}
+  else if(el.id==='stock-filter'){activeShopStockOnly=el.checked;renderShop(new URLSearchParams());}
+  else if(el.id==='sort-select'){activeShopSort=el.value;renderShop(new URLSearchParams());}
+  else if(el.matches('[data-action="retailer-order-status"]')){
+    if(isFirebaseConfigured()){callCloudFunction('updateRetailerOrderStatus',{retailerOrderId:el.dataset.id,status:el.value},'Order status updated.').catch(()=>{});}
+    else {const orders=store.orders();const order=orders.find(o=>o.id===el.dataset.id);if(order){order.status=el.value;store.saveOrders(orders);showToast('Order status updated in demo.');}}
+  }
+});
+
+document.addEventListener('submit',e=>{
+  const form=e.target;
+  if(form.id==='global-search'){
+    e.preventDefault();const q=String(document.getElementById('search-input').value||'').trim();activeShopQuery=q;activeShopCategory='';navigate(`#shop?q=${encodeURIComponent(q)}`);
+  } else if(form.id==='retailer-login-form'||form.id==='admin-login-form'){
+    e.preventDefault();const fd=new FormData(form);
+    if(isFirebaseConfigured()){
+      const email=String(fd.get('email')||'').trim();const password=String(fd.get('password')||'');const mode=String(e.submitter?.value||fd.get('authMode')||'signin');
+      if(!email||!password)return showToast('Enter your email and password.','warn');
+      const operation=mode==='signup'?createEmailAccount(email,password):signInEmail(email,password);
+      operation.then(()=>showToast(mode==='signup'?'Account created. Complete shop registration next.':'Signed in successfully.')).catch(error=>showToast(firebaseErrorMessage(error),'error'));
+      return;
+    }
+    const username=String(fd.get('username')||'');const password=String(fd.get('password')||'');
+    if(form.id==='retailer-login-form'){
+      if(username!=='retailer'||password!=='retailer')return showToast('Incorrect retailer ID or password.','error');
+      const profile=store.retailers().find(r=>r.ownerId==='demo-retailer'||r.email==='retailer@pashughar.demo')||{};
+      store.saveSession({uid:'demo-retailer',name:profile.contactName||'Demo Retailer',email:profile.email||'retailer@pashughar.demo',role:'retailer',demoAccessVersion:2,storeName:profile.storeName||'',storeSetupComplete:Boolean(profile.storeName),storePhone:profile.phone||'',storeLocation:profile.location||'',storeDescription:profile.description||'',storeStatus:profile.status||'pending'});
+      render();showToast(profile.storeName?(profile.status==='approved'?'Welcome back to your verified shop.':'Your shop is awaiting admin verification.'):'Sign in complete. Register your shop to request verification.');
+      return;
+    }
+    if(username!=='admin'||password!=='admin')return showToast('Incorrect administrator ID or password.','error');
+    store.saveSession({uid:'demo-admin',name:'Pashughar Admin',email:'admin@pashughar.demo',role:'admin',demoAccessVersion:2});render();showToast('Admin demo session opened.');
+  } else if(form.id==='retailer-profile-form'){
+    e.preventDefault();const fd=new FormData(form);const user=session();if(!user||user.role!=='retailer')return showToast('Please sign in as a retailer.','error');
+    let storeName=String(fd.get('storeName')||'').trim();let contactName=String(fd.get('contactName')||'').trim();const phone=String(fd.get('phone')||'').trim();let email=String(fd.get('email')||'').trim();const location=String(fd.get('location')||'').trim();const description=String(fd.get('description')||'').trim();
+    const retailers=store.retailers();const existing=retailers.find(r=>r.ownerId===user.uid||r.email?.toLowerCase()===email.toLowerCase());
+    if(isFirebaseConfigured()&&existing){storeName=existing.storeName;contactName=existing.contactName;email=existing.email;}
+    if(!storeName||!contactName||!phone||!email||!location)return showToast('Complete shop name, contact name, phone, email and location.','error');
+    const changedIdentity=existing&&(['storeName','contactName','phone','email','location'].some(k=>String(existing[k]||'').trim()!==String(({storeName,contactName,phone,email,location})[k]||'').trim()));
+    let status=existing?.status||'pending';
+    if(!existing)status='pending';
+    if(isFirebaseConfigured()&&existing&&status==='rejected')return showToast('This application was rejected. Contact Pashughar support to request another review.','warn');
+    if(existing&&status==='approved'&&changedIdentity&&!isFirebaseConfigured()){status='pending';showToast('Shop contact details changed. Please wait for re-verification.','warn');}
+    const record={...(existing||{}),id:isFirebaseConfigured()?user.uid:(existing?.id||slugId()),ownerId:user.uid,storeName,contactName,email,phone,location,description,status,createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
+    Object.assign(user,{name:contactName,email,storeName,storeSetupComplete:true,storePhone:phone,storeLocation:location,storeDescription:description,storeStatus:status});if(!isFirebaseConfigured())store.saveSession(user);
+    const saveResult=store.saveRetailers(existing?retailers.map(r=>r.id===existing.id?record:r):[record,...retailers]);
+    if(isFirebaseConfigured()){
+      showToast('Submitting shop details…');
+      Promise.resolve(saveResult).then(()=>{renderSellerDashboard();showToast(status==='approved'?'Shop profile saved.':'Shop submitted for admin verification.');}).catch(()=>{});
+    } else {renderSellerDashboard();showToast(status==='approved'?'Shop profile saved.':'Shop submitted for admin verification.');}
+  } else if(form.id==='product-form'){
+    e.preventDefault();submitProduct(form);
+  } else if(form.id==='report-form'){
+    e.preventDefault();submitReport(form);
+  } else if(form.id==='checkout-form'){
+    e.preventDefault();submitCheckout(form);
+  } else if(form.id==='seller-profile-form'){
+    e.preventDefault();const fd=new FormData(form);const user=session();if(!user||user.role!=='retailer')return showToast('Sign in as a retailer first.','error');
+    let storeName=String(fd.get('storeName')||'').trim();let contactName=String(fd.get('contactName')||'').trim();const phone=String(fd.get('phone')||'').trim();let email=String(fd.get('email')||'').trim();const location=String(fd.get('location')||'').trim();const description=String(fd.get('description')||'').trim();
+    const retailers=store.retailers();const existing=retailerProfile(user);if(!existing)return renderSellerSetup(user);
+    if(isFirebaseConfigured()){storeName=existing.storeName;contactName=existing.contactName;email=existing.email;}
+    if(!storeName||!contactName||!phone||!email||!location)return showToast('Complete all required shop details.','error');
+    const changed=['storeName','contactName','phone','email','location'].some(k=>String(existing[k]||'').trim()!==String(({storeName,contactName,phone,email,location})[k]||'').trim());
+    const nextStatus=isFirebaseConfigured()?existing.status:(changed&&existing.status==='approved'?'pending':existing.status);
+    const record={...existing,storeName,contactName,phone,email,location,description,status:nextStatus,updatedAt:new Date().toISOString()};
+    const saveResult=store.saveRetailers(retailers.map(r=>r.id===existing.id?record:r));
+    Object.assign(user,{name:contactName,email,storeName,storePhone:phone,storeLocation:location,storeDescription:description,storeStatus:nextStatus});if(!isFirebaseConfigured())store.saveSession(user);
+    if(isFirebaseConfigured()){
+      showToast('Saving shop profile…');
+      Promise.resolve(saveResult).then(()=>{renderSellerDashboard();showToast(nextStatus==='pending'&&changed?'Shop details changed and need re-verification.':'Shop profile saved.');}).catch(()=>{});
+    } else {renderSellerDashboard();showToast(nextStatus==='pending'&&changed?'Shop details changed and need re-verification.':'Shop profile saved.');}
+  }
+});
+
+window.addEventListener('hashchange',()=>{render();scrollTop();document.getElementById('main-nav').classList.remove('open');document.getElementById('menu-toggle')?.setAttribute('aria-expanded','false');});
+document.getElementById('menu-toggle')?.addEventListener('click',()=>{const nav=document.getElementById('main-nav');const open=nav.classList.toggle('open');document.getElementById('menu-toggle').setAttribute('aria-expanded',String(open));});
+modal?.addEventListener('click',e=>{if(e.target===modal)closeModal();});
+document.getElementById('year').textContent=new Date().getFullYear();
+initializeTheme();
+window.addEventListener('pashughar:cloud-error', event => {
+  const detail=event.detail||{};
+  showToast(firebaseErrorMessage({code:detail.code,message:detail.message}), 'error');
+});
+window.addEventListener('pashughar:cloud-updated', () => {
+  const active=document.activeElement;
+  if(active && ['INPUT','TEXTAREA','SELECT'].includes(active.tagName)) return;
+  render();
+});
+render();
+if(isFirebaseConfigured()) {
+  startFirebaseBridge({onSessionChanged: next => {
+    firebaseSession = next;
+    if(getRoute().path==='admin' && next && next.role!=='admin') showToast('This account is not authorized for the admin panel.','warn');
+    render();
+  }});
+}

@@ -1,0 +1,14 @@
+{
+  "name": "pashughar-marketplace-starter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pashughar multi-vendor animal marketplace website starter",
+  "scripts": {
+    "serve": "python -m http.server 8080",
+    "firebase:emulators": "firebase emulators:start",
+    "deploy": "firebase deploy --only hosting,firestore:rules",
+    "deploy:hosting": "firebase deploy --only hosting",
+    "deploy:rules": "firebase deploy --only firestore:rules",
+    "deploy:functions": "firebase deploy --only functions"
+  }
+}

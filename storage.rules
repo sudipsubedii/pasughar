@@ -1,0 +1,10 @@
+// Storage is intentionally disabled for this Pashughar version.
+// These rules deny all access if Storage is ever enabled by mistake.
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

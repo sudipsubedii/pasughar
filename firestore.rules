@@ -1,0 +1,123 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isAdmin() { return signedIn() && request.auth.token.admin == true; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+    function retailerPath(uid) { return /databases/$(database)/documents/retailers/$(uid); }
+    function isVerifiedRetailer() {
+      return signedIn()
+        && exists(retailerPath(request.auth.uid))
+        && get(retailerPath(request.auth.uid)).data.status == 'approved';
+    }
+    function validImageUrl(value) {
+      return value is string && value.size() <= 2048 && value.matches('https://.*');
+    }
+    function validImages(images) {
+      return images is list && images.size() >= 1 && images.size() <= 5
+        && validImageUrl(images[0])
+        && (images.size() < 2 || validImageUrl(images[1]))
+        && (images.size() < 3 || validImageUrl(images[2]))
+        && (images.size() < 4 || validImageUrl(images[3]))
+        && (images.size() < 5 || validImageUrl(images[4]));
+    }
+    function validProduct(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 120
+        && data.description is string && data.description.size() > 0 && data.description.size() <= 2500
+        && data.price is number && data.price > 0 && data.price <= 100000000
+        && data.stock is int && data.stock >= 0 && data.stock <= 1000000
+        && data.category is string && data.category.size() <= 80
+        && data.unit is string && data.unit.size() <= 30
+        && data.location is string && data.location.size() <= 220
+        && validImageUrl(data.image) && validImages(data.images)
+        && data.attributes is map;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId)
+        && request.resource.data.keys().hasOnly(['displayName','email','phone','createdAt','role'])
+        && request.resource.data.role == 'customer';
+      allow update: if isOwner(userId)
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName','phone','photoURL','updatedAt']);
+      allow delete: if isAdmin();
+    }
+
+    // Retailer documents are keyed by Firebase Auth UID in production.
+    // A new seller may create only their own pending application. Only admin code may verify/suspend them.
+    match /retailers/{retailerId} {
+      allow read: if isOwner(retailerId) || isAdmin();
+      allow create: if isOwner(retailerId)
+        && request.resource.data.keys().hasOnly(['ownerId','storeName','contactName','email','phone','location','description','status','createdAt','updatedAt'])
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.storeName is string && request.resource.data.storeName.size() > 0
+        && request.resource.data.contactName is string && request.resource.data.contactName.size() > 0
+        && request.resource.data.email is string && request.resource.data.email.size() > 0
+        && request.resource.data.phone is string && request.resource.data.phone.size() > 0
+        && request.resource.data.location is string && request.resource.data.location.size() > 0;
+      allow update: if isAdmin() || (isOwner(retailerId)
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['description','phone','location','updatedAt']));
+      allow delete: if isAdmin();
+    }
+
+    match /products/{productId} {
+      // Public catalogue query filters on status == 'approved'. Firestore Rules are not
+      // filters, so keep the public read condition query-provable. Only verified retailers
+      // can create/update published listings; trusted admin moderation also changes listing
+      // status when a shop is suspended/banned.
+      allow read: if isAdmin()
+        || (signedIn() && resource.data.retailerId == request.auth.uid)
+        || resource.data.status == 'approved';
+      allow create: if isVerifiedRetailer()
+        && request.resource.data.retailerId == request.auth.uid
+        && request.resource.data.status == 'approved'
+        && validProduct(request.resource.data)
+        && request.resource.data.keys().hasOnly(['name','category','condition','description','price','unit','stock','location','image','images','attributes','retailer','retailerId','status','createdAt','updatedAt']);
+      allow update: if isAdmin() || (isVerifiedRetailer()
+        && resource.data.retailerId == request.auth.uid
+        && request.resource.data.retailerId == resource.data.retailerId
+        && request.resource.data.status == resource.data.status
+        && resource.data.status == 'approved'
+        && validProduct(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','category','condition','description','price','unit','stock','location','image','images','attributes','retailer','updatedAt']));
+      allow delete: if isAdmin() || (isVerifiedRetailer() && resource.data.retailerId == request.auth.uid);
+    }
+
+    match /orders/{orderId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.customerId == request.auth.uid);
+      allow create, update, delete: if false; // Use createOrder callable; supports guest checkout.
+    }
+    match /retailerOrders/{retailerOrderId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.retailerId == request.auth.uid);
+      allow create, update, delete: if false;
+    }
+
+    // Reports are written/moderated only through trusted Cloud Functions.
+    // Their content is private to admins, which avoids exposing reporter contact details.
+    match /reports/{reportId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+    match /reportDedupe/{key} { allow read, write: if false; }
+    match /reportRateLimits/{key} { allow read, write: if false; }
+    // Checkout idempotency records are server-only. The Admin SDK bypasses these client rules.
+    match /orderRequests/{requestId} { allow read, write: if false; }
+
+    match /reviews/{reviewId} {
+      allow read: if resource.data.status == 'published' || isAdmin() || (signedIn() && resource.data.customerId == request.auth.uid);
+      allow create: if signedIn()
+        && request.resource.data.customerId == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.rating is int
+        && request.resource.data.rating >= 1 && request.resource.data.rating <= 5;
+      allow update, delete: if isAdmin();
+    }
+    match /wishlists/{userId} { allow read, write: if isOwner(userId); }
+    match /platformSettings/{settingId} { allow read: if signedIn(); allow write: if isAdmin(); }
+    match /auditLogs/{logId} { allow read: if isAdmin(); allow write: if false; }
+  }
+}

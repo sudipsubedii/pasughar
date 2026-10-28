@@ -1,0 +1,296 @@
+/* Pashughar Firebase client integration.
+ * This file contains only the public web-app configuration. Never put service-account
+ * credentials, payment secrets, or privileged Admin SDK keys in browser code.
+ * Firebase Storage is intentionally not initialized or used in this version.
+ */
+import { initializeApp, getApps } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js';
+import {
+  getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup,
+  signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut,
+  sendPasswordResetEmail, getIdTokenResult
+} from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-auth.js';
+import {
+  getFirestore, collection, doc, getDoc, onSnapshot, query, where,
+  setDoc, updateDoc, deleteDoc, getDocs, writeBatch, serverTimestamp, deleteField
+} from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js';
+import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-functions.js';
+import { store, configurePersistenceAdapter, hydrateCollection } from './store.js';
+
+export const firebaseConfig = {
+  apiKey: 'AIzaSyBDpG4pEd4bv3yQGB8nSjeKRwMtNJ4DILs',
+  authDomain: 'pashughar-25ecc.firebaseapp.com',
+  projectId: 'pashughar-25ecc',
+  storageBucket: 'pashughar-25ecc.firebasestorage.app',
+  messagingSenderId: '437614878388',
+  appId: '1:437614878388:web:ce8551792d5ff6f69901e1',
+  measurementId: 'G-J34XYVTZTE'
+};
+
+export const isFirebaseConfigured = () => Boolean(
+  firebaseConfig.apiKey && firebaseConfig.projectId && firebaseConfig.appId
+);
+
+const firebaseApp = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+export const auth = getAuth(firebaseApp);
+export const db = getFirestore(firebaseApp);
+// The included functions scaffold uses this region. Deploying callable functions may require
+// upgrading the Firebase project to the Blaze plan; the client does not upgrade billing.
+export const functions = getFunctions(firebaseApp, 'asia-south2');
+const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
+
+export const signInGoogle = () => signInWithPopup(auth, googleProvider);
+export const signInEmail = (email, password) => signInWithEmailAndPassword(auth, email.trim(), password);
+export const createEmailAccount = (email, password) => createUserWithEmailAndPassword(auth, email.trim(), password);
+export const resetEmailPassword = email => sendPasswordResetEmail(auth, email.trim());
+export const signOutUser = () => signOut(auth);
+export const getCallable = name => httpsCallable(functions, name);
+export const getRoleClaims = async user => {
+  const result = await getIdTokenResult(user);
+  return result.claims || {};
+};
+
+function toPlain(value) {
+  if (value == null) return value;
+  if (typeof value.toDate === 'function') return value.toDate().toISOString();
+  if (Array.isArray(value)) return value.map(toPlain);
+  if (typeof value === 'object') {
+    const out = {};
+    for (const [key, item] of Object.entries(value)) out[key] = toPlain(item);
+    return out;
+  }
+  return value;
+}
+function unpack(snapshot) {
+  return snapshot.docs.map(item => ({ id: item.id, ...toPlain(item.data()) }));
+}
+function fireError(error) {
+  window.dispatchEvent(new CustomEvent('pashughar:cloud-error', {
+    detail: { code: error?.code || 'unknown', message: error?.message || 'Cloud operation failed.' }
+  }));
+}
+function docData(record) {
+  const out = { ...record };
+  delete out.id; // document ID is the canonical ID; do not duplicate it in product documents.
+  return out;
+}
+const byId = items => new Map((items || []).map(item => [String(item.id), item]));
+const equivalent = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+async function persistChanges(collectionName, previous, next) {
+  if (!auth.currentUser) throw new Error('Sign in before saving marketplace changes.');
+  const before = byId(previous);
+  const after = byId(next);
+  for (const [id, record] of after) {
+    const old = before.get(id);
+    if (old && equivalent(old, record)) continue;
+    const documentId = collectionName === 'retailers' ? String(record.ownerId || id) : id;
+    const ref = doc(db, collectionName, documentId);
+    const data = docData(record);
+    if (old) await updateDoc(ref, data);
+    else await setDoc(ref, data);
+  }
+  for (const [id] of before) {
+    if (after.has(id)) continue;
+    const record = before.get(id);
+    const documentId = collectionName === 'retailers' ? String(record.ownerId || id) : id;
+    await deleteDoc(doc(db, collectionName, documentId));
+  }
+}
+
+configurePersistenceAdapter({
+  products: (previous, next) => persistChanges('products', previous, next).catch(error => {
+    hydrateCollection('products', previous);
+    fireError(error);
+    throw error;
+  }),
+  retailers: (previous, next) => persistChanges('retailers', previous, next).catch(error => {
+    hydrateCollection('retailers', previous);
+    fireError(error);
+    throw error;
+  })
+});
+
+function requireCurrentAdmin() {
+  if (!auth.currentUser) throw new Error('Sign in with the designated administrator account first.');
+  return getIdTokenResult(auth.currentUser).then(result => {
+    if (result.claims?.admin !== true) throw new Error('This account does not have the trusted Pashughar admin role.');
+    return auth.currentUser;
+  });
+}
+
+/** Admin operations secured by Firestore Rules/custom claims, so shop/product moderation
+ * does not need a Cloud Function deployment. Never accept an admin role from form data. */
+export async function moderateRetailerDirect({ retailerId, decision, reason = '' }) {
+  const user = await requireCurrentAdmin();
+  if (!retailerId || !['approved', 'rejected', 'suspended', 'banned'].includes(decision)) throw new Error('Invalid shop moderation request.');
+  const retailerRef = doc(db, 'retailers', retailerId);
+  const retailerSnap = await getDoc(retailerRef);
+  if (!retailerSnap.exists()) throw new Error('Retailer profile not found.');
+  await updateDoc(retailerRef, {
+    status: decision,
+    statusReason: String(reason).slice(0, 500) || null,
+    reviewedBy: user.uid,
+    reviewedAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+
+  const matches = await getDocs(query(collection(db, 'products'), where('retailerId', '==', retailerId)));
+  let batch = writeBatch(db);
+  let pending = 0;
+  let updated = 0;
+  for (const productSnap of matches.docs) {
+    const product = productSnap.data();
+    let change = null;
+    if (['rejected', 'suspended', 'banned'].includes(decision) && product.status === 'approved') {
+      change = { status: 'suspended', suspensionCause: 'retailer', updatedAt: serverTimestamp() };
+    } else if (decision === 'approved' && product.status === 'suspended' && product.suspensionCause === 'retailer') {
+      change = { status: 'approved', suspensionCause: deleteField(), updatedAt: serverTimestamp() };
+    }
+    if (change) {
+      batch.update(productSnap.ref, change);
+      pending += 1;
+      updated += 1;
+      if (pending === 400) { await batch.commit(); batch = writeBatch(db); pending = 0; }
+    }
+  }
+  if (pending) await batch.commit();
+  return { retailerId, status: decision, productsUpdated: updated };
+}
+
+export async function moderateProductDirect({ productId, decision, reason = '' }) {
+  const user = await requireCurrentAdmin();
+  if (!productId || !['approved', 'suspended'].includes(decision)) throw new Error('Invalid product moderation request.');
+  const ref = doc(db, 'products', productId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('Product not found.');
+  if (decision === 'approved') {
+    const retailerRef = doc(db, 'retailers', String(snap.data().retailerId || ''));
+    const retailerSnap = await getDoc(retailerRef);
+    if (!retailerSnap.exists() || retailerSnap.data().status !== 'approved') throw new Error('The retailer must be verified before restoring this product.');
+  }
+  await updateDoc(ref, {
+    status: decision,
+    adminReason: String(reason).slice(0, 500) || null,
+    reviewedBy: user.uid,
+    reviewedAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+  return { productId, status: decision };
+}
+
+export async function removeProductDirect({ productId }) {
+  await requireCurrentAdmin();
+  if (!productId) throw new Error('Product ID is required.');
+  const ref = doc(db, 'products', productId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('Product not found.');
+  await deleteDoc(ref);
+  return { productId, removed: true };
+}
+
+/**
+ * Attach real auth state and live Firestore data to the existing UI.
+ * The app keeps localStorage as a cache for cart/theme/wishlist only; cloud listeners
+ * replace the catalogue and protected dashboard datasets when Firebase is connected.
+ */
+export function startFirebaseBridge({ onSessionChanged }) {
+  if (!isFirebaseConfigured()) return () => {};
+  let dataUnsubscribers = [];
+  let publicProducts = [];
+  let ownProducts = [];
+  let ownRetailerOrderDocs = [];
+  let authRun = 0;
+
+  const stopDataListeners = () => {
+    dataUnsubscribers.forEach(unsub => { try { unsub(); } catch {} });
+    dataUnsubscribers = [];
+  };
+  const listen = (target, callback, onError = fireError) => {
+    const unsub = onSnapshot(target, callback, onError);
+    dataUnsubscribers.push(unsub);
+    return unsub;
+  };
+  const mergeProducts = () => {
+    const map = new Map();
+    for (const item of [...publicProducts, ...ownProducts]) map.set(item.id, item);
+    hydrateCollection('products', [...map.values()]);
+  };
+  const startPublicData = () => {
+    publicProducts = [];
+    ownProducts = [];
+    const q = query(collection(db, 'products'), where('status', '==', 'approved'));
+    listen(q, snapshot => { publicProducts = unpack(snapshot); mergeProducts(); });
+    hydrateCollection('retailers', []);
+    hydrateCollection('reports', []);
+    hydrateCollection('orders', []);
+  };
+  const startRetailerData = uid => {
+    listen(doc(db, 'retailers', uid), snapshot => {
+      const profile = snapshot.exists() ? [{ id: snapshot.id, ...toPlain(snapshot.data()) }] : [];
+      hydrateCollection('retailers', profile);
+    });
+    listen(query(collection(db, 'products'), where('retailerId', '==', uid)), snapshot => {
+      ownProducts = unpack(snapshot);
+      mergeProducts();
+    });
+    listen(query(collection(db, 'retailerOrders'), where('retailerId', '==', uid)), snapshot => {
+      ownRetailerOrderDocs = unpack(snapshot);
+      const orders = ownRetailerOrderDocs.map(order => ({
+        ...order,
+        id: order.id,
+        total: Number(order.subtotal || 0),
+        customerName: order.customerName || 'Customer',
+        customerEmail: order.customerEmail || '',
+        items: (order.items || []).map(item => ({
+          ...item, id: item.productId, qty: Number(item.quantity || 0), price: Number(item.unitPrice || 0)
+        }))
+      }));
+      hydrateCollection('orders', orders);
+    });
+  };
+  const startAdminData = () => {
+    // These listeners are only created after a server-assigned admin custom claim is verified.
+    listen(collection(db, 'products'), snapshot => hydrateCollection('products', unpack(snapshot)));
+    listen(collection(db, 'retailers'), snapshot => hydrateCollection('retailers', unpack(snapshot)));
+    listen(collection(db, 'orders'), snapshot => hydrateCollection('orders', unpack(snapshot)));
+    listen(collection(db, 'reports'), snapshot => hydrateCollection('reports', unpack(snapshot)));
+  };
+
+  const unsubscribeAuth = onAuthStateChanged(auth, async user => {
+    const run = ++authRun;
+    stopDataListeners();
+    publicProducts = [];
+    ownProducts = [];
+    ownRetailerOrderDocs = [];
+    if (!user) {
+      hydrateCollection('retailers', []);
+      hydrateCollection('reports', []);
+      hydrateCollection('orders', []);
+      startPublicData();
+      onSessionChanged(null);
+      return;
+    }
+    let claims = {};
+    try { claims = await getRoleClaims(user); }
+    catch (error) { fireError(error); }
+    if (run !== authRun) return;
+    const isAdmin = claims.admin === true;
+    const session = {
+      uid: user.uid,
+      name: user.displayName || user.email?.split('@')[0] || 'Retailer',
+      email: user.email || '',
+      photoURL: user.photoURL || '',
+      role: isAdmin ? 'admin' : 'retailer',
+      firebase: true
+    };
+    onSessionChanged(session);
+    if (isAdmin) {
+      startAdminData();
+      return;
+    }
+    startPublicData();
+    startRetailerData(user.uid);
+  });
+  return () => { stopDataListeners(); unsubscribeAuth(); };
+}
