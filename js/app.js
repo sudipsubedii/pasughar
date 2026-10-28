@@ -758,6 +758,7 @@ window.addEventListener('scroll',()=>{
 },{passive:true});
 document.getElementById('back-to-top')?.addEventListener('click',()=>window.scrollTo({top:0,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'}));
 modal?.addEventListener('click',e=>{if(e.target===modal)closeModal();});
+modal?.addEventListener('cancel',e=>{e.preventDefault();closeModal();});
 document.getElementById('year').textContent=new Date().getFullYear();
 initializeTheme();
 try{history.replaceState({... (history.state||{}),pashugharRoute:location.hash||location.pathname,pashugharScrollY:window.scrollY},'',location.href);}catch{}
