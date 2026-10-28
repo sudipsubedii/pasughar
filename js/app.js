@@ -893,7 +893,7 @@ document.addEventListener('change',async e=>{
   else if(el.id==='stock-filter'){activeShopStockOnly=el.checked;renderShop(new URLSearchParams());}
   else if(el.id==='sort-select'){activeShopSort=el.value;renderShop(new URLSearchParams());}
   else if(el.matches('[data-action="retailer-order-status"]')){
-    if(isFirebaseConfigured()){callCloudFunction('updateRetailerOrderStatus',{retailerOrderId:el.dataset.id,status:el.value},'Order status updated.').catch(()=>{});}
+    if(isFirebaseConfigured()){updateRetailerOrderStatusDirect({retailerOrderId:el.dataset.id,status:el.value}).then(()=>{showToast('Order status updated.');}).catch(error=>{showToast(error.message||firebaseErrorMessage(error),'error');renderSellerDashboard();});}
     else {const orders=store.orders();const order=orders.find(o=>o.id===el.dataset.id);if(order){order.status=el.value;store.saveOrders(orders);showToast('Order status updated in demo.');}}
   }
 });
