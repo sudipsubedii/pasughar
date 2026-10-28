@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const {onCall, HttpsError} = require('firebase-functions/v2/https');
-const {onDocumentUpdated} = require('firebase-functions/v2/firestore');
+const {onDocumentCreated, onDocumentUpdated} = require('firebase-functions/v2/firestore');
 const {onSchedule} = require('firebase-functions/v2/scheduler');
 const {setGlobalOptions} = require('firebase-functions/v2');
 const {initializeApp} = require('firebase-admin/app');
@@ -379,6 +379,29 @@ function slotLockId(storeId, date, slot) {
   return hash('vet-slot:' + storeId + ':' + date + ':' + slot);
 }
 
+/** Return only provider slots which remain unreserved on a selected Nepal-local date. */
+exports.getAvailableVetSlots = onCall(async request => {
+  requireAuth(request);
+  const storeId = cleanId(request.data && request.data.storeId,160);
+  const date = asText(request.data && request.data.appointmentDate,10);
+  const excludeAppointmentId = cleanId(request.data && request.data.excludeAppointmentId,160);
+  if (!storeId || !validDate(date)) throw new HttpsError('invalid-argument','Choose a valid appointment date.');
+  const providerSnap = await db.collection('publicStores').doc(storeId).get();
+  if (!providerSnap.exists || providerSnap.data().isVet !== true) throw new HttpsError('failed-precondition','This provider is not accepting veterinary appointments.');
+  const slots = Array.isArray(providerSnap.data().vetAppointmentSlots) ? providerSnap.data().vetAppointmentSlots : [];
+  if (!slots.length) return {slots:[]};
+  const refs = slots.map(slot => db.collection('vetSlotLocks').doc(slotLockId(storeId,date,slot)));
+  const lockSnaps = await db.getAll(...refs);
+  const now = Date.now();
+  const availableSlots = slots.filter((slot,index) => {
+    const instant = appointmentInstant(date,slot);
+    if (!instant || instant.getTime() <= now) return false;
+    const lock = lockSnaps[index];
+    return !lock.exists || lock.data().active !== true || lock.data().appointmentId === excludeAppointmentId;
+  });
+  return {slots:availableSlots};
+});
+
 /**
  * Reserve a veterinary appointment slot atomically. Slot-lock documents prevent two
  * customers booking the same provider/date/time even when requests arrive simultaneously.
@@ -510,7 +533,8 @@ exports.notifyWishlistProductChanges = onDocumentUpdated('products/{productId}',
 exports.sendAppointmentReminders = onSchedule('every 30 minutes', async () => {
   const now = Date.now();
   const fromDate = new Date(now - 24*60*60*1000).toISOString().slice(0,10);
-  const snap = await db.collection('vetAppointments').where('appointmentDate','>=',fromDate).get();
+  const toDate = new Date(now + 3*24*60*60*1000).toISOString().slice(0,10);
+  const snap = await db.collection('vetAppointments').where('appointmentDate','>=',fromDate).where('appointmentDate','<=',toDate).get();
   for (const d of snap.docs) {
     const a=d.data();
     if (!['confirmed'].includes(a.status)) continue;
@@ -534,7 +558,7 @@ exports.sendAppointmentReminders = onSchedule('every 30 minutes', async () => {
     });
   }
 });
-exports.notifyOrderCreated = require('firebase-functions/v2/firestore').onDocumentCreated('orders/{orderId}', async event => {
+exports.notifyOrderCreated = onDocumentCreated('orders/{orderId}', async event => {
   const order=event.data && event.data.data();
   if(!order || !order.customerId)return;
   await db.collection('users').doc(order.customerId).collection('notifications').add({
