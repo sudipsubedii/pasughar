@@ -17,7 +17,7 @@ service cloud.firestore {
       );
     }
     function isVerifiedRetailer() {
-      return hasVerifiedContact()
+      return hasRetailerRole() && hasVerifiedContact()
         && exists(retailerPath(request.auth.uid))
         && get(retailerPath(request.auth.uid)).data.status == 'approved';
     }
