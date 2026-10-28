@@ -226,7 +226,7 @@ function renderCheckout() {
   if(!cart.length) {location.hash='#cart';return;}
   const {subtotal,total}=cartTotals(cart);
   const existing = document.getElementById('checkout-area');
-  if(existing) existing.innerHTML=`<div class="panel-card" style="margin-top:22px"><div class="panel-heading"><div><h2>Checkout</h2><p>${isFirebaseConfigured()?'Enter delivery information. Stock and order totals are validated on the server.':'Enter delivery information to place a demo order.'}</p></div></div>${demoNotice()}<form id="checkout-form" data-request-id="${safe((globalThis.crypto?.randomUUID?.() || slugId()))}"><div class="field-grid"><div class="field"><label for="checkout-name">Full name *</label><input id="checkout-name" name="name" required value="${safe(session()?.name||'')}" placeholder="Your full name"></div><div class="field"><label for="checkout-phone">Phone number *</label><input id="checkout-phone" name="phone" required inputmode="tel" placeholder="98XXXXXXXX"></div></div><div class="field"><label for="checkout-address">Delivery address *</label><textarea id="checkout-address" name="address" required placeholder="Street, area, municipality"></textarea></div><div class="field-grid"><div class="field"><label for="checkout-city">City / district *</label><input id="checkout-city" name="city" required placeholder="e.g. Pokhara"></div><div class="field"><label for="checkout-notes">Order notes</label><input id="checkout-notes" name="notes" placeholder="Optional instructions"></div></div><h4 class="form-section-title">Payment method</h4><label class="radio-card"><input type="radio" name="payment" value="cod" checked><div><strong>Cash on delivery</strong><span>No online payment is processed; the retailer will coordinate fulfilment.</span></div></label><label class="radio-card"><input type="radio" name="payment" value="contact_seller"><div><strong>Contact retailer to arrange payment</strong><span>Use this for listings that require coordination before fulfilment.</span></div></label><div class="summary-line total"><span>Order subtotal</span><strong>${money(total)}</strong></div><p class="small-muted">${isFirebaseConfigured()?'No online payment is processed. The order will be placed only if the secure order service is deployed and validation succeeds.':'Placing this demo order records it only in this browser. No real order is sent to a retailer.'}</p><button type="submit" class="button button-primary">${isFirebaseConfigured()?'Place order':'Place demo order'} · ${money(subtotal)} →</button></form></div>`;
+  if(existing) existing.innerHTML=`<div class="panel-card" style="margin-top:22px"><div class="panel-heading"><div><h2>Checkout</h2><p>${isFirebaseConfigured()?'Enter delivery information. Stock and order totals are validated on the server.':'Enter delivery information to place a demo order.'}</p></div></div>${demoNotice()}<form id="checkout-form" data-request-id="${safe((globalThis.crypto?.randomUUID?.() || slugId()))}"><div class="field-grid"><div class="field"><label for="checkout-name">Full name *</label><input id="checkout-name" name="name" required value="${safe(session()?.name||'')}" placeholder="Your full name"></div><div class="field"><label for="checkout-phone">Phone number *</label><input id="checkout-phone" name="phone" required inputmode="tel" placeholder="98XXXXXXXX"></div></div>${!session()&&isFirebaseConfigured()?'<div class="checkout-phone-verify"><p><strong>Guest checkout phone verification</strong><br><span>Verify your mobile number by OTP. No password or separate sign-up form is required.</span></p><div id="checkout-recaptcha-container"></div><button class="button button-secondary" type="button" data-action="checkout-send-otp">Verify phone by OTP</button><div id="checkout-otp-group" hidden><div class="field"><label for="checkout-otp">SMS verification code</label><input id="checkout-otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6-digit code"></div><button class="button button-primary" type="button" data-action="checkout-confirm-otp">Confirm phone</button></div><p id="checkout-verified-message" class="small-muted" hidden>Phone verified.</p></div>':''}<div class="field"><label for="checkout-address">Delivery address *</label><textarea id="checkout-address" name="address" required placeholder="Street, area, municipality"></textarea></div><div class="field-grid"><div class="field"><label for="checkout-city">City / district *</label><input id="checkout-city" name="city" required placeholder="e.g. Pokhara"></div><div class="field"><label for="checkout-notes">Order notes</label><input id="checkout-notes" name="notes" placeholder="Optional instructions"></div></div><h4 class="form-section-title">Payment method</h4><label class="radio-card"><input type="radio" name="payment" value="cod" checked><div><strong>Cash on delivery</strong><span>No online payment is processed; the retailer will coordinate fulfilment.</span></div></label><label class="radio-card"><input type="radio" name="payment" value="contact_seller"><div><strong>Contact retailer to arrange payment</strong><span>Use this for listings that require coordination before fulfilment.</span></div></label><div class="summary-line total"><span>Order subtotal</span><strong>${money(total)}</strong></div><p class="small-muted">${isFirebaseConfigured()?'No online payment is processed. The order will be placed only if the secure order service is deployed and validation succeeds.':'Placing this demo order records it only in this browser. No real order is sent to a retailer.'}</p><button type="submit" class="button button-primary">${isFirebaseConfigured()?'Place order':'Place demo order'} · ${money(subtotal)} →</button></form></div>`;
   existing?.scrollIntoView({behavior:'smooth',block:'start'});
 }
 function renderSellerLanding() { renderRetailerLogin(); }
@@ -306,7 +306,7 @@ function renderAuthPage(defaultRole = authRole) {
     ? '<form id="auth-email-form">'+roleField+'<div class="field"><label for="auth-email">Email address</label><input id="auth-email" name="email" type="email" required autocomplete="email" maxlength="254" placeholder="you@example.com"></div><div class="field"><label for="auth-password">Password</label><input id="auth-password" name="password" type="password" minlength="6" required autocomplete="'+(authMode==='signup'?'new-password':'current-password')+'" placeholder="At least 6 characters"></div>'+remember+'<button class="button button-primary button-wide" type="submit">'+(authMode==='signup'?'Create account':'Log in')+' →</button></form><button class="button button-secondary button-wide" data-action="auth-password-reset" type="button">Forgot password?</button><button class="button button-secondary button-wide" data-action="auth-google" type="button">Continue with Google</button>'
     : '';
   const phonePanel = authChannel==='phone'
-    ? '<form id="auth-phone-form" onsubmit="return false">'+roleField+'<div class="field"><label for="auth-phone">Mobile number</label><input id="auth-phone" name="phone" inputmode="tel" autocomplete="tel" required value="'+safe(phoneDraft)+'" placeholder="+977 98XXXXXXXX"><small>Nepal numbers such as 98XXXXXXXX are accepted.</small></div><div id="phone-recaptcha-container"></div><button class="button button-primary button-wide" type="button" data-action="send-phone-otp">'+(phoneOtpSent?'Resend verification code':'Send phone OTP')+' →</button>'+(phoneOtpSent?'<div class="field"><label for="auth-otp">6-digit verification code</label><input id="auth-otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required placeholder="Enter code"></div><button class="button button-primary button-wide" type="button" data-action="confirm-phone-otp">Verify and continue →</button>':'')+'</form>'
+    ? '<form id="auth-phone-form" onsubmit="return false">'+roleField+'<div class="field"><label for="auth-phone">Mobile number</label><input id="auth-phone" name="phone" inputmode="tel" autocomplete="tel" required value="'+safe(phoneDraft)+'" placeholder="+977 98XXXXXXXX"><small>Nepal numbers such as 98XXXXXXXX are accepted.</small></div>'+remember+'<div id="phone-recaptcha-container"></div><button class="button button-primary button-wide" type="button" data-action="send-phone-otp">'+(phoneOtpSent?'Resend verification code':'Send phone OTP')+' →</button>'+(phoneOtpSent?'<div class="field"><label for="auth-otp">6-digit verification code</label><input id="auth-otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required placeholder="Enter code"></div><button class="button button-primary button-wide" type="button" data-action="confirm-phone-otp">Verify and continue →</button>':'')+'</form>'
     : '';
   app.innerHTML = '<div class="auth-page"><div class="auth-card auth-card-wide auth-unified"><div class="auth-icon">♙</div><div class="eyebrow">Pashughar account</div><h1>'+(authMode==='signup'?'Create your account':'Log in to Pashughar')+'</h1><p class="auth-description">'+(authMode==='signup'?'Choose customer or retailer. Retailer shops still need admin approval.':'Sign in to continue. Browsing and guest checkout remain available.')+'</p><div class="auth-mode-tabs"><button type="button" class="'+(authMode==='signin'?'active':'')+'" data-action="auth-mode" data-mode="signin">Log in</button><button type="button" class="'+(authMode==='signup'?'active':'')+'" data-action="auth-mode" data-mode="signup">Sign up</button></div>'+channelTabs+emailPanel+phonePanel+'<div class="auth-footnote">Email accounts must verify their email, or use verified phone OTP, before retailer listings can be published. Admin access is controlled by a trusted Firebase claim.</div><a class="auth-back-link" href="#home">← Back to shopping</a></div></div>';
 }
@@ -430,7 +430,6 @@ function render() {
   else if(path.startsWith('product/'))renderProduct(decodeURIComponent(path.slice(8)));
   else if(path==='cart')renderCart();
   else if(path==='account')renderAccount();
-  else if(path==='login')renderAuthPage('customer');
   else if(path==='seller') { if(session()?.role==='retailer')renderSellerDashboard(); else renderAuthPage('retailer'); }
   else if(path==='admin') { if(session()?.role==='admin')renderAdmin(); else renderAdminLogin(); }
   else if(path==='wishlist')renderWishlist();
@@ -438,6 +437,7 @@ function render() {
   else renderSimplePage('not-found');
   renderRouteChrome(path,params);
   updateCartCount();
+  if(session())resetAutoLogoutTimer();
 }
 function navigate(hash, options = {}) {
   const target = String(hash || '#home').startsWith('#') ? String(hash || '#home') : '#'+String(hash);
@@ -542,9 +542,18 @@ async function shrinkImage(file){
   let data=canvas.toDataURL('image/webp',0.78);if(!data.startsWith('data:image/webp'))data=canvas.toDataURL('image/jpeg',0.78);return data;
 }
 function renderProductImagePreview(){const preview=document.getElementById('pf-image-preview');if(!preview)return;const urls=(document.getElementById('pf-image-urls')?.value||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);const local=currentProductImages.filter(x=>String(x).startsWith('data:'));const all=[...urls,...local].slice(0,5);preview.innerHTML=all.map((src,i)=>`<div><img src="${safe(src)}" alt="Product photo ${i+1}"><span>${i+1}</span></div>`).join('');}
+function normalizePhoneDigits(value){
+  let digits=String(value||'').replace(/\\D/g,'');
+  if(digits.startsWith('977'))return digits;
+  if(digits.startsWith('0'))return '977'+digits.slice(1);
+  if(digits.startsWith('9'))return '977'+digits;
+  return digits;
+}
 function submitCheckout(form){
   const data=new FormData(form);const cart=store.cart();if(!cart.length)return showToast('Your cart is empty.','error');
   if(isFirebaseConfigured()&&session()&&!isVerifiedContact({emailVerified:session().emailVerified,phoneNumber:session().phoneNumber})){showToast('Verify your email or phone before ordering.','warn');navigate('#account');return;}
+  if(isFirebaseConfigured()&&!session()&&!verifiedCheckoutPhone){showToast('Verify the guest checkout phone by OTP before placing this order.','warn');return;}
+  if(isFirebaseConfigured()&&!session()&&verifiedCheckoutPhone&&normalizePhoneDigits(String(new FormData(form).get('phone')||''))!==normalizePhoneDigits(verifiedCheckoutPhone)){showToast('The delivery phone number must match the verified number.','warn');return;}
   for(const item of cart){const p=getProduct(item.id);if(!p||p.status!=='approved'||!isAvailable(p)||Number(item.qty)>Number(p.stock))return showToast('One or more items are no longer available in the requested quantity. Review your cart.','error');}
   const name=String(data.get('name')||'').trim(), phone=String(data.get('phone')||'').trim(), address=String(data.get('address')||'').trim(), city=String(data.get('city')||'').trim(), notes=String(data.get('notes')||'').trim();
   if(!name||!phone||!address||!city)return showToast('Complete your name, phone, address and city.','error');
@@ -625,6 +634,30 @@ document.addEventListener('click',e=>{
     const remember=document.getElementById('remember-me')?.checked!==false;
     if(!phoneDraft)return showToast('Enter your mobile number first.','warn');
     sendPhoneOtp(phoneDraft,authRole,remember).then(()=>{phoneOtpSent=true;renderAuthPage(authRole);showToast('Verification code sent. Enter the code to continue.');}).catch(error=>showToast(firebaseErrorMessage(error),'error'));
+  }
+  else if(action==='checkout-send-otp'){
+    if(!isFirebaseConfigured())return showToast('Phone OTP requires Firebase Authentication.','error');
+    const input=document.getElementById('checkout-phone');const phone=String(input?.value||'').trim();
+    if(!phone)return showToast('Enter the delivery mobile number first.','warn');
+    sendPhoneOtp(phone,'customer',false,'checkout-recaptcha-container').then(()=>{
+      checkoutOtpSent=true;verifiedCheckoutPhone='';
+      const group=document.getElementById('checkout-otp-group');if(group)group.hidden=false;
+      document.getElementById('checkout-otp')?.focus();
+      showToast('Verification code sent. Enter it to verify your guest checkout phone.');
+    }).catch(error=>showToast(firebaseErrorMessage(error),'error'));
+  }
+  else if(action==='checkout-confirm-otp'){
+    if(!checkoutOtpSent)return showToast('Request a verification code first.','warn');
+    const code=document.getElementById('checkout-otp')?.value||'';
+    confirmPhoneOtp(code,'customer').then(credential=>{
+      verifiedCheckoutPhone=credential.user.phoneNumber||'';
+      firebaseSession={...(firebaseSession||{}),uid:credential.user.uid,name:credential.user.displayName||credential.user.phoneNumber,email:credential.user.email||'',phoneNumber:credential.user.phoneNumber||'',emailVerified:Boolean(credential.user.emailVerified),role:'customer',firebase:true};
+      const group=document.getElementById('checkout-otp-group');if(group)group.hidden=true;
+      const verifyButton=document.querySelector('[data-action="checkout-send-otp"]');if(verifyButton){verifyButton.disabled=true;verifyButton.textContent='✓ Phone verified';}
+      const message=document.getElementById('checkout-verified-message');if(message)message.hidden=false;
+      updateCartCount();
+      showToast('Phone verified. You can place your order without setting a password.');
+    }).catch(error=>showToast(firebaseErrorMessage(error),'error'));
   }
   else if(action==='confirm-phone-otp'){
     const code=document.getElementById('auth-otp')?.value||'';authRole=document.getElementById('auth-role')?.value||authRole;
@@ -861,6 +894,7 @@ window.addEventListener('pashughar:cloud-error', event => {
 });
 ['pointerdown','keydown','touchstart','mousemove'].forEach(type=>document.addEventListener(type,()=>{if(session())resetAutoLogoutTimer();},{passive:true}));
 window.addEventListener('pashughar:cloud-updated', () => {
+  if(getRoute().path==='cart'&&document.getElementById('checkout-form')){updateCartCount();return;}
   const active=document.activeElement;
   if(active && ['INPUT','TEXTAREA','SELECT'].includes(active.tagName)) return;
   render();
@@ -878,6 +912,7 @@ if(isFirebaseConfigured()) {
       return;
     }
     if(getRoute().path==='admin' && next && next.role!=='admin') showToast('This account is not authorized for the admin panel.','warn');
+    if(getRoute().path==='cart'&&document.getElementById('checkout-form')){updateCartCount();return;}
     render();
   }});
 }
