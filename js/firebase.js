@@ -137,6 +137,31 @@ export async function confirmPhoneOtp(code, role = 'customer') {
 export const isVerifiedContact = user => Boolean(user && (user.emailVerified === true || (typeof user.phoneNumber === 'string' && user.phoneNumber.length > 0)));
 export const signOutUser = () => signOut(auth);
 export const getCallable = name => httpsCallable(functions, name);
+export async function createProductEnquiry({productId, productName, retailerId, customerName, customerPhone, message}) {
+  if (!auth.currentUser) throw new Error('Sign in to send the retailer an enquiry.');
+  const text = String(message || '').trim();
+  if (!productId || !retailerId || !text || text.length < 5) throw new Error('Write an enquiry with at least five characters.');
+  return addDoc(collection(db,'enquiries'), {
+    productId, productName:String(productName||'').slice(0,160), retailerId,
+    customerUid:auth.currentUser.uid, customerName:String(customerName||auth.currentUser.displayName||'Customer').trim().slice(0,120),
+    customerEmail:auth.currentUser.email||'', customerPhone:String(customerPhone||auth.currentUser.phoneNumber||'').slice(0,40),
+    message:text.slice(0,1500), reply:'', status:'open',
+    createdAt:serverTimestamp(), updatedAt:serverTimestamp()
+  });
+}
+export async function replyToEnquiry(enquiryId, reply) {
+  if (!auth.currentUser) throw new Error('Sign in to reply.');
+  const text=String(reply||'').trim();
+  if(!enquiryId||text.length<2||text.length>1500) throw new Error('Reply must contain 2 to 1,500 characters.');
+  return updateDoc(doc(db,'enquiries',enquiryId),{reply:text,status:'replied',updatedAt:serverTimestamp()});
+}
+export async function saveRetailerVerificationAndProfile({retailerId, updates}) {
+  const user=auth.currentUser;
+  if(!user||user.uid!==retailerId) throw new Error('You can update only your own retailer profile.');
+  const allowed={...updates};
+  delete allowed.ownerId; delete allowed.status; delete allowed.reviewedBy; delete allowed.reviewedAt;
+  return updateDoc(doc(db,'retailers',retailerId),{...allowed,updatedAt:serverTimestamp()});
+}
 export async function updateBreedingBookingStatus(bookingId, status) {
   if (!['accepted','declined','completed','cancelled'].includes(status)) throw new Error('Invalid booking status.');
   const user = auth.currentUser;
@@ -227,6 +252,11 @@ configurePersistenceAdapter({
   }),
   retailers: (previous, next) => persistChanges('retailers', previous, next).catch(error => {
     hydrateCollection('retailers', previous);
+    fireError(error);
+    throw error;
+  }),
+  enquiries: (previous, next) => persistChanges('enquiries', previous, next).catch(error => {
+    hydrateCollection('enquiries', previous);
     fireError(error);
     throw error;
   })
@@ -356,6 +386,7 @@ export function startFirebaseBridge({ onSessionChanged }) {
       mergeProducts();
     });
     listen(query(collection(db, 'breedingBookings'), where('retailerId', '==', uid)), snapshot => hydrateCollection('breedingBookings', unpack(snapshot)));
+    listen(query(collection(db, 'enquiries'), where('retailerId', '==', uid)), snapshot => hydrateCollection('enquiries', unpack(snapshot)));
     listen(query(collection(db, 'retailerOrders'), where('retailerId', '==', uid)), snapshot => {
       ownRetailerOrderDocs = unpack(snapshot);
       const orders = ownRetailerOrderDocs.map(order => ({
@@ -378,6 +409,7 @@ export function startFirebaseBridge({ onSessionChanged }) {
     listen(collection(db, 'orders'), snapshot => hydrateCollection('orders', unpack(snapshot)));
     listen(collection(db, 'reports'), snapshot => hydrateCollection('reports', unpack(snapshot)));
     listen(collection(db, 'breedingBookings'), snapshot => hydrateCollection('breedingBookings', unpack(snapshot)));
+    listen(collection(db, 'enquiries'), snapshot => hydrateCollection('enquiries', unpack(snapshot)));
   };
 
   const unsubscribeAuth = onAuthStateChanged(auth, async user => {
@@ -391,6 +423,7 @@ export function startFirebaseBridge({ onSessionChanged }) {
       hydrateCollection('reports', []);
       hydrateCollection('orders', []);
       hydrateCollection('breedingBookings', []);
+      hydrateCollection('enquiries', []);
       startPublicData();
       onSessionChanged(null);
       return;
