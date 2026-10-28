@@ -416,11 +416,12 @@ function loadListingContactActions(product) {
     if(!profile||!host.isConnected)return;
     const raw=String(profile.publicPhone||'').trim();
     const digits=raw.replace(/[^0-9]/g,'');
+    const whatsappNumber=digits.length===10 && digits.startsWith('9') ? '977'+digits : digits;
     const msg=encodeURIComponent('Hello, I am asking about '+String(product.name||'this listing')+'. '+location.origin+location.pathname+'#product/'+encodeURIComponent(product.id));
     const buttons=[];
     if(raw)buttons.push('<a class="button button-secondary" href="tel:'+safe(raw)+'">Call seller</a>');
-    if(digits.length>=7)buttons.push('<a class="button button-secondary" target="_blank" rel="noopener noreferrer" href="https://wa.me/'+digits+'?text='+msg+'">WhatsApp seller</a>');
-    if(raw)buttons.push('<a class="button button-secondary" href="viber://chat?number='+encodeURIComponent(raw)+'">Viber seller</a>');
+    if(whatsappNumber.length>=7)buttons.push('<a class="button button-secondary" target="_blank" rel="noopener noreferrer" href="https://wa.me/'+whatsappNumber+'?text='+msg+'">WhatsApp seller</a>');
+    if(raw)buttons.push('<a class="button button-secondary" href="viber://chat?number='+encodeURIComponent(raw)">Viber seller</a>');
     if(buttons.length)host.insertAdjacentHTML('beforeend',buttons.join(''));
   }).catch(()=>{});
 }
