@@ -5,6 +5,11 @@ service cloud.firestore {
     function isAdmin() { return signedIn() && request.auth.token.admin == true; }
     function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
     function retailerPath(uid) { return /databases/$(database)/documents/retailers/$(uid); }
+    function userPath(uid) { return /databases/$(database)/documents/users/$(uid); }
+    function hasRetailerRole() {
+      return signedIn() && exists(userPath(request.auth.uid))
+        && get(userPath(request.auth.uid)).data.role == 'retailer';
+    }
     function hasVerifiedContact() {
       return signedIn() && (
         request.auth.token.email_verified == true
@@ -54,7 +59,7 @@ service cloud.firestore {
     // A new seller may create only their own pending application. Only admin code may verify/suspend them.
     match /retailers/{retailerId} {
       allow read: if isOwner(retailerId) || isAdmin();
-      allow create: if isOwner(retailerId)
+      allow create: if isOwner(retailerId) && hasRetailerRole()
         && request.resource.data.keys().hasOnly(['ownerId','storeName','contactName','email','phone','location','description','status','createdAt','updatedAt'])
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.status == 'pending'
@@ -63,7 +68,7 @@ service cloud.firestore {
         && request.resource.data.email is string && request.resource.data.email.size() > 0
         && request.resource.data.phone is string && request.resource.data.phone.size() > 0
         && request.resource.data.location is string && request.resource.data.location.size() > 0;
-      allow update: if isAdmin() || (isOwner(retailerId)
+      allow update: if isAdmin() || (isOwner(retailerId) && hasRetailerRole()
         && request.resource.data.ownerId == resource.data.ownerId
         && request.resource.data.status == resource.data.status
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['description','phone','location','updatedAt']));
