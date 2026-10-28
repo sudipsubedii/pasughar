@@ -174,7 +174,7 @@ service cloud.firestore {
 
     match /enquiries/{enquiryId} {
       allow create: if hasVerifiedContact()
-        && request.resource.data.keys().hasOnly(['productId','productName','retailerId','customerUid','customerName','customerEmail','customerPhone','message','reply','status','createdAt','updatedAt'])
+        && request.resource.data.keys().hasOnly(['productId','productName','retailerId','customerUid','customerName','customerEmail','customerPhone','message','messages','reply','status','createdAt','updatedAt'])
         && request.resource.data.customerUid == request.auth.uid
         && request.resource.data.productId is string
         && request.resource.data.retailerId is string
