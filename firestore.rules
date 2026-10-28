@@ -182,6 +182,8 @@ service cloud.firestore {
         && request.resource.data.message.size() >= 5
         && request.resource.data.message.size() <= 1500
         && request.resource.data.status == 'open'
+        && request.resource.data.messages is list
+        && request.resource.data.messages.size() == 0
         && request.resource.data.reply == ''
         && exists(/databases/$(database)/documents/products/$(request.resource.data.productId))
         && get(/databases/$(database)/documents/products/$(request.resource.data.productId)).data.status == 'approved'
@@ -190,7 +192,7 @@ service cloud.firestore {
         || (signedIn() && resource.data.customerUid == request.auth.uid)
         || (signedIn() && resource.data.retailerId == request.auth.uid);
       allow update: if isAdmin()
-        || (signedIn() && resource.data.retailerId == request.auth.uid
+        || (signedIn() && (resource.data.customerUid == request.auth.uid || resource.data.retailerId == request.auth.uid)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reply','status','messages','updatedAt'])
           && request.resource.data.reply is string
           && request.resource.data.reply.size() <= 1500
