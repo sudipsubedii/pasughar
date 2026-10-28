@@ -7,7 +7,9 @@ const STORAGE_KEYS = {
   retailers: 'pashughar.retailers.v1',
   reports: 'pashughar.reports.v1',
   breedingBookings: 'pashughar.breedingBookings.v1',
-  enquiries: 'pashughar.enquiries.v1'
+  enquiries: 'pashughar.enquiries.v1',
+  vetAppointments: 'pashughar.vetAppointments.v1',
+  notifications: 'pashughar.notifications.v1'
 };
 
 let persistenceAdapter = null;
@@ -71,6 +73,10 @@ export const store = {
   saveBreedingBookings: (items) => writeJson(STORAGE_KEYS.breedingBookings, items),
   enquiries: () => readJson(STORAGE_KEYS.enquiries, []),
   saveEnquiries: (items) => { const previous=readJson(STORAGE_KEYS.enquiries,[]); const next=Array.isArray(items)?items:[]; writeJson(STORAGE_KEYS.enquiries,next); return persistCloud('enquiries',previous,next); },
+  vetAppointments: () => readJson(STORAGE_KEYS.vetAppointments, []),
+  saveVetAppointments: (items) => writeJson(STORAGE_KEYS.vetAppointments, items),
+  notifications: () => readJson(STORAGE_KEYS.notifications, []),
+  saveNotifications: (items) => writeJson(STORAGE_KEYS.notifications, items),
   resetDemo: () => { Object.values(STORAGE_KEYS).forEach(k => localStorage.removeItem(k)); initializeStore(); }
 };
 // Each marketplace category has its own palette, inspired by the user's visual references.
@@ -115,7 +121,7 @@ export const safe = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&'
 
 // Cloud snapshots update the local cache without triggering write-back loops.
 export function hydrateCollection(name, items) {
-  const key = ({ products: STORAGE_KEYS.products, retailers: STORAGE_KEYS.retailers, orders: STORAGE_KEYS.orders, reports: STORAGE_KEYS.reports, breedingBookings: STORAGE_KEYS.breedingBookings, enquiries: STORAGE_KEYS.enquiries })[name];
+  const key = ({ products: STORAGE_KEYS.products, retailers: STORAGE_KEYS.retailers, orders: STORAGE_KEYS.orders, reports: STORAGE_KEYS.reports, breedingBookings: STORAGE_KEYS.breedingBookings, enquiries: STORAGE_KEYS.enquiries, vetAppointments: STORAGE_KEYS.vetAppointments, notifications: STORAGE_KEYS.notifications })[name];
   if (!key) throw new Error(`Unknown cache collection: ${name}`);
   writeJson(key, Array.isArray(items) ? items : []);
   try { window.dispatchEvent(new CustomEvent('pashughar:cloud-updated', { detail: { name, count: Array.isArray(items) ? items.length : 0 } })); } catch {}
