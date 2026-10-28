@@ -745,7 +745,7 @@ function renderCustomerOrders() {
 function renderConversationMessages(enquiry, viewerRole='customer') {
   const initial={senderRole:'customer',senderUid:enquiry.customerUid||'',body:enquiry.message||'',createdAt:enquiry.createdAt,legacy:true};
   const messages=[initial,...(Array.isArray(enquiry.messages)?enquiry.messages:[])].filter(m=>m.body);
-  return '<div class="conversation-messages">'+messages.map(message=>'<div class="conversation-message '+(message.senderRole==='customer'?'from-customer':'from-seller')+'"><div class="conversation-message-role">'+(message.senderRole==='retailer'?'Seller':'You')+'</div><p>'+safe(message.body)+'</p><small>'+safe(formatCustomerDate(message.createdAt))+'</small></div>').join('')+'</div>';
+  return '<div class="conversation-messages">'+messages.map(message=>'<div class="conversation-message '+(message.senderRole==='customer'?'from-customer':'from-seller')+'"><div class="conversation-message-role">'+(message.senderRole===viewerRole?'You':message.senderRole==='retailer'?'Seller':'Customer')+'</div><p>'+safe(message.body)+'</p><small>'+safe(formatCustomerDate(message.createdAt))+'</small></div>').join('')+'</div>';
 }
 function renderCustomerEnquiries() {
   if(!customerPageGuard('My enquiries'))return;
