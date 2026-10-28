@@ -24,6 +24,12 @@ service cloud.firestore {
     function validImageUrl(value) {
       return value is string && value.size() <= 2048 && value.matches('https://.*');
     }
+    function validVideos(videos) {
+      return videos is list && videos.size() <= 3
+        && (videos.size() < 1 || validImageUrl(videos[0]))
+        && (videos.size() < 2 || validImageUrl(videos[1]))
+        && (videos.size() < 3 || validImageUrl(videos[2]));
+    }
     function validImages(images) {
       return images is list && images.size() >= 1 && images.size() <= 5
         && validImageUrl(images[0])
@@ -42,7 +48,7 @@ service cloud.firestore {
         && data.location is string && data.location.size() <= 220
         && validImageUrl(data.image) && validImages(data.images)
         && data.attributes is map
-        && (!('videoUrls' in data) || (data.videoUrls is list && data.videoUrls.size() <= 3));
+        && (!('videoUrls' in data) || validVideos(data.videoUrls));
     }
 
     match /users/{userId} {
