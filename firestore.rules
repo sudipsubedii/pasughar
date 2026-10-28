@@ -115,6 +115,7 @@ service cloud.firestore {
       allow update: if (isAdmin() || (signedIn() && resource.data.retailerId == request.auth.uid))
         && request.resource.data.retailerId == resource.data.retailerId
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','statusUpdatedBy','updatedAt'])
+        && request.resource.data.statusUpdatedBy == request.auth.uid
         && request.resource.data.status in ['Confirmed','Rejected','Processing','Shipped','Delivered','Cancelled']
         && (isAdmin()
           || (resource.data.status == 'Pending' && request.resource.data.status in ['Confirmed','Rejected','Cancelled'])
