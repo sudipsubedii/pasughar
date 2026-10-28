@@ -1,5 +1,5 @@
 import {store, CATEGORIES, money, categoryName, normalizeCategoryId, slugId, safe, hydrateCollection} from './store.js';
-import {isFirebaseConfigured, signInGoogle, signInEmail, createEmailAccount, resetEmailPassword, signOutUser, sendVerificationEmail, refreshAuthUser, sendPhoneOtp, confirmPhoneOtp, isVerifiedContact, setRememberMe, startFirebaseBridge, getCallable, moderateRetailerDirect, moderateProductDirect, removeProductDirect, createBreedingBooking, updateBreedingBookingStatus, createProductEnquiry, replyToEnquiry, getPublicStoreProfile, updateRetailerOrderStatusDirect, getPublishedProductReviews, submitProductReview} from './firebase.js';
+import {isFirebaseConfigured, signInGoogle, signInEmail, createEmailAccount, resetEmailPassword, signOutUser, sendVerificationEmail, refreshAuthUser, sendPhoneOtp, confirmPhoneOtp, isVerifiedContact, setRememberMe, startFirebaseBridge, getCallable, moderateRetailerDirect, moderateProductDirect, removeProductDirect, createBreedingBooking, updateBreedingBookingStatus, createProductEnquiry, replyToEnquiry, sendEnquiryMessage, getPublicStoreProfile, getVeterinaryProviders, createVetAppointment, manageVetAppointment, saveCustomerProfile, saveCustomerWishlist, markCustomerNotificationRead, updateRetailerOrderStatusDirect, getPublishedProductReviews, submitProductReview} from './firebase.js';
 
 store.init();
 // In Firebase mode, never briefly display fictional sample catalogue/dashboard data while
@@ -9,6 +9,8 @@ if (isFirebaseConfigured()) {
   hydrateCollection('retailers', []);
   hydrateCollection('orders', []);
   hydrateCollection('reports', []);
+  hydrateCollection('vetAppointments', []);
+  hydrateCollection('notifications', []);
 }
 // Clear legacy role-preview sessions from the earlier prototype after splitting access routes.
 const cachedSession = store.session();
@@ -41,6 +43,8 @@ let currentProductImageUrl = '';
 let currentProductImages = [];
 let activeProductImageIndex = 0;
 let activeReportFilter = 'open';
+let veterinaryProvidersCache = null;
+let customerProfileSaving = false;
 let firebaseSession = null;
 let catalogueLoaded = !isFirebaseConfigured();
 let authMode = 'signin';
@@ -745,12 +749,12 @@ function routeTitle(path, params) {
     return cat?.name || 'Marketplace';
   }
   if (path === 'pet-section') return ({pets:'Pets for sale',accessories:'Pet accessories',breeding:'Pet breeding'})[params.get('type')] || 'Pet section';
-  return ({pets:'Pets & supplies',cart:'Shopping cart',wishlist:'Saved items',seller:'Retailer workspace',admin:'Admin dashboard',about:'About Pashughar',learn:'Learn',contact:'Contact',privacy:'Privacy policy',terms:'Terms & conditions'})[path] || 'Page not found';
+  return ({pets:'Pets & supplies',cart:'Shopping cart',wishlist:'Saved items',orders:'My orders',enquiries:'My enquiries',notifications:'Notifications',vets:'Veterinary appointments',appointments:'My appointments',seller:'Retailer workspace',admin:'Admin dashboard',about:'About Pashughar',learn:'Learn',contact:'Contact',privacy:'Privacy policy',terms:'Terms & conditions'})[path] || 'Page not found';
 }
 function renderRouteChrome(path, params) {
   if (['home','admin','login','account','pets','pet-section','about','learn','contact','privacy','terms'].includes(path)) return;
   if (path==='seller' && session()?.role!=='retailer') return;
-  if (!['shop','cart','wishlist','seller'].includes(path) && !path.startsWith('product/')) return;
+  if (!['shop','cart','wishlist','orders','enquiries','notifications','vets','appointments','seller'].includes(path) && !path.startsWith('product/')) return;
   const title = routeTitle(path, params);
   let parent = '<a href="#home">Home</a>';
   if (path.startsWith('product/')) {
@@ -780,7 +784,7 @@ function render() {
   const {path,params}=getRoute();
   delete app.dataset.sectionTheme;
   document.querySelectorAll('.nav-inner a').forEach(a=>a.classList.toggle('current',a.getAttribute('href')===`#${path}`));
-  const known = ['home','shop','pets','pet-section','cart','account','login','seller','admin','wishlist','about','learn','contact','privacy','terms'];
+  const known = ['home','shop','pets','pet-section','cart','account','login','seller','admin','wishlist','orders','enquiries','notifications','vets','appointments','about','learn','contact','privacy','terms'];
   if(path==='home')renderHome();
   else if(path==='login')renderAuthPage('customer');
   else if(path==='shop') { activeShopQuery=params.get('q')??''; activeShopCategory=params.get('category')??''; renderShop(params); }
@@ -793,6 +797,11 @@ function render() {
   else if(path==='seller') { if(session()?.role==='retailer')renderSellerDashboard(); else renderAuthPage('retailer'); }
   else if(path==='admin') { if(session()?.role==='admin')renderAdmin(); else renderAdminLogin(); }
   else if(path==='wishlist')renderWishlist();
+  else if(path==='orders')renderCustomerOrders();
+  else if(path==='enquiries')renderCustomerEnquiries();
+  else if(path==='notifications')renderCustomerNotifications();
+  else if(path==='vets')renderVeterinaryProviders();
+  else if(path==='appointments')renderCustomerAppointments();
   else if(known.includes(path))renderSimplePage(path);
   else renderSimplePage('not-found');
   renderRouteChrome(path,params);
