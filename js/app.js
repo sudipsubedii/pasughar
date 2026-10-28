@@ -650,8 +650,14 @@ function renderAdminSettings() {
 }
 
 function renderWishlist() {
+  const user=session();
   const ids=store.wishlist();const products=ids.map(getProduct).filter(Boolean);
-  app.innerHTML=`<div class="page-wrap"><div class="container"><div class="page-title-row"><div><div class="eyebrow">Saved for later</div><h1>Your wishlist</h1><p>Keep the products you may want to order.</p></div></div>${products.length?`<div class="product-grid">${products.map(productCard).join('')}</div>`:emptyState('♡','No saved products yet','Tap the heart on any product to save it here.','#shop','Browse products')}</div></div>`;
+  const syncNotice=isFirebaseConfigured()&&user?.role==='customer'
+    ? '<div class="notice notice-info">Wishlist sync is enabled for this signed-in account. Saved items follow you across devices.</div>'
+    : isFirebaseConfigured()
+      ? '<div class="notice notice-warn">These items are saved on this device until you sign in. Sign in to sync your wishlist to your account.</div><a class="button button-primary" href="#login">Sign in to sync wishlist</a>'
+      : '<div class="notice notice-warn">Prototype mode: wishlist items are saved only in this browser.</div>';
+  app.innerHTML='<div class="page-wrap"><div class="container"><div class="page-title-row"><div><div class="eyebrow">Saved for later</div><h1>Your wishlist</h1><p>'+products.length+' saved item(s).</p></div><a class="button button-secondary" href="#shop">Browse products</a></div>'+syncNotice+(products.length?'<div class="product-grid">'+products.map(productCard).join('')+'</div>':emptyState('♡','No saved products yet','Tap the heart on any product to save it here.','#shop','Browse products'))+'</div></div>';
 }
 function renderAuthPage(defaultRole = authRole) {
   authGateActive = true;
@@ -956,7 +962,7 @@ function addToCart(id, qty=null){
   store.saveCart(cart);updateCartCount();showToast(`Added to basket: ${product.name}.`);
 }
 function updateCartQty(id, delta){const cart=store.cart();const item=cart.find(i=>i.id===id);const p=getProduct(id);if(!item||!p)return;const step=Number(p.orderStep??p.attributes?.orderStep??quantityStep(p))||quantityStep(p);if(delta>0&&item.qty+step>Number(p.stock))return showToast('No more stock is available.','warn');const next=item.qty+delta*step;const min=Number(p.minOrderQuantity??p.attributes?.minOrderQuantity??0);if(delta<0&&next>0&&next+0.00001<min)return showToast('Use Remove to remove this item; the remaining quantity must meet the seller minimum.','warn');item.qty=next;if(item.qty<=0){store.saveCart(cart.filter(i=>i.id!==id));}else{store.saveCart(cart);}renderCart();}
-function toggleWishlist(id){const list=store.wishlist();if(list.includes(id)){store.saveWishlist(list.filter(i=>i!==id));showToast('Removed from your wishlist.');}else{store.saveWishlist([...list,id]);showToast('Saved to wishlist.');}render();}
+function toggleWishlist(id){const list=store.wishlist();const next=list.includes(id)?list.filter(i=>i!==id):[...list,id];store.saveWishlist(next);if(isFirebaseConfigured()&&session()?.role==='customer'){saveCustomerWishlist(next).catch(error=>showToast(firebaseErrorMessage(error),'error'));}showToast(list.includes(id)?'Removed from your wishlist.':'Saved to wishlist.');render();}
 function openProductForm(product=null){
   const user=session();if(!user || user.role!=='retailer')return showToast('Sign in to the retailer workspace first.','warn');const profile=retailerProfile(user);if(!profile||profile.status!=='approved'){if(profile)renderRetailerVerificationState(user,profile);else renderSellerSetup(user);return showToast('Your shop must be verified before publishing products.','warn');}
   const p=product||{};if(product&&!(p.retailerId===user.uid||(user.uid==='demo-retailer'&&p.retailerId==='retailer-demo')))return showToast('You can only edit your own listings.','error');
