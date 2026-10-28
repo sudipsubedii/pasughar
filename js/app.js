@@ -868,6 +868,7 @@ function resetAutoLogoutTimer() {
   if (!session()) return;
   inactivityTimer = setTimeout(() => {
     signOutUser().catch(()=>{});
+    store.saveWishlist([]);
     firebaseSession = null;
     store.saveSession(null);
     navigate('#login');
@@ -1190,6 +1191,7 @@ function callCloudFunction(name, payload, successMessage) {
 }
 function endDemoSession() {
   if (isFirebaseConfigured()) {
+    store.saveWishlist([]); // prevent one account's cached wishlist being displayed after sign-out
     signOutUser().catch(error => showToast(firebaseErrorMessage(error), 'error'));
     return;
   }
@@ -1594,6 +1596,8 @@ render();
 if(isFirebaseConfigured()) {
   startFirebaseBridge({onSessionChanged: next => {
     authStateReady = true;
+    const previousSession = firebaseSession;
+    if (previousSession && (!next || previousSession.uid !== next.uid)) store.saveWishlist([]);
     firebaseSession = next;
     if(next)resetAutoLogoutTimer();else clearTimeout(inactivityTimer);
     if (next && next.role === 'admin' && getRoute().path !== 'admin') { navigate('#admin'); return; }
