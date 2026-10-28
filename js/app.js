@@ -596,6 +596,7 @@ render();
 if(isFirebaseConfigured()) {
   startFirebaseBridge({onSessionChanged: next => {
     firebaseSession = next;
+    if (next && next.role === 'admin' && getRoute().path !== 'admin') { navigate('#admin'); return; }
     if(getRoute().path==='admin' && next && next.role!=='admin') showToast('This account is not authorized for the admin panel.','warn');
     render();
   }});
