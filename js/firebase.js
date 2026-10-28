@@ -108,12 +108,13 @@ function normalizePhoneNumber(value) {
   if (!/^\+[1-9][0-9]{7,14}$/.test(phone)) throw new Error('Enter a valid phone number with country code, for example +97798XXXXXXXX.');
   return phone;
 }
-export async function sendPhoneOtp(phone, role = 'customer', rememberMe = true) {
+export async function sendPhoneOtp(phone, role = 'customer', rememberMe = true, containerId = 'phone-recaptcha-container') {
   if (!['customer','retailer'].includes(role)) throw new Error('Choose customer or retailer for sign-in.');
   pendingAuthRole = role;
   await setRememberMe(rememberMe);
   const normalized = normalizePhoneNumber(phone);
-  if (!phoneVerifier) phoneVerifier = new RecaptchaVerifier(auth, 'phone-recaptcha-container', {size:'invisible'});
+  if (phoneVerifier) { try { await phoneVerifier.clear(); } catch {} phoneVerifier = null; }
+  phoneVerifier = new RecaptchaVerifier(auth, containerId, {size:'invisible'});
   try {
     phoneConfirmationResult = await signInWithPhoneNumber(auth, normalized, phoneVerifier);
     return true;
