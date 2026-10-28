@@ -3,6 +3,34 @@ import {store} from './store.js';
 import {collection,doc,getDoc,getDocs,query,where,limit,addDoc,setDoc,updateDoc,serverTimestamp,onSnapshot,orderBy} from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js';
 import {updateProfile} from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-auth.js';
 const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function refreshVetAvailability(form) {
+  const vetId = String(form.querySelector('[name="vetId"]')?.value || '');
+  const date = String(form.querySelector('[name="date"]')?.value || '');
+  const select = form.querySelector('[name="time"]');
+  if (!select) return;
+  const options = [...select.options].filter(option => option.value);
+  options.forEach(option => {
+    if (!option.dataset.originalLabel) option.dataset.originalLabel = option.textContent.replace(/ — Unavailable$/, '');
+    option.disabled = false;
+    option.textContent = option.dataset.originalLabel;
+  });
+  if (!vetId || !date) return;
+  try {
+    const response = await getCallable('getVetUnavailableSlots')({vetId,date});
+    const unavailable = new Set(response.data?.unavailable || []);
+    options.forEach(option => {
+      if (unavailable.has(option.value)) {
+        option.disabled = true;
+        option.textContent = option.dataset.originalLabel + ' — Unavailable';
+      }
+    });
+    if (unavailable.has(select.value)) select.value = '';
+  } catch (error) {
+    toast(error?.message || 'Could not refresh available slots. The server will still prevent double-booking.');
+  }
+}
+
 const nepalToday=()=>new Date(Date.now()+345*60*1000).toISOString().slice(0,10);
 const dt=v=>{const d=v?.toDate?v.toDate():new Date(v||'');return isNaN(d)?'Date pending':d.toLocaleString();}, cash=v=>'Rs. '+Number(v||0).toLocaleString('en-IN',{maximumFractionDigits:2});
 const page=(ey,t,d,b)=>'<div class="page-wrap"><div class="container"><div class="page-title-row"><div><div class="eyebrow">'+esc(ey)+'</div><h1>'+esc(t)+'</h1><p>'+esc(d)+'</p></div></div>'+b+'</div></div>';
@@ -34,6 +62,8 @@ export async function renderCustomerFeature(path,app){
   const times=Array.from({length:16},(_,i)=>{const m=540+i*30;return '<option value="'+String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0')+'">'+String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0')+'</option>';}).join('');
   const form='<div class="panel-card" style="margin-bottom:16px"><h2>Book a veterinary appointment</h2><form id="vet-appointment-form"><div class="field"><label>Veterinarian / clinic</label><select name="vetId" required><option value="">Choose a vet</option>'+vets.map(v=>'<option value="'+esc(v.id)+'">'+esc(v.storeName||'Veterinary clinic')+' — '+esc(v.location||'Nepal')+'</option>').join('')+'</select></div><div class="field"><label>Date</label><input type="date" name="date" min="'+nepalToday()+'" required></div><div class="field"><label>Time slot</label><select name="time" required><option value="">Choose time</option>'+times+'</select></div><div class="field"><label>Animal and reason</label><textarea name="reason" minlength="5" maxlength="1000" required></textarea></div><button class="button button-primary" '+(vets.length?'':'disabled')+'>Request appointment</button>'+(vets.length?'':'<p>No veterinary clinics are currently listed.</p>')+'</form></div>';
   app.innerHTML=page('Animal care','Veterinary appointments','Book, reschedule or cancel a visit.',form+(rows.length?rows.map(a=>'<article class="panel-card" style="margin-bottom:10px"><div class="panel-heading"><h2>'+esc(a.vetName||'Veterinary appointment')+'</h2><span class="status-pill">'+esc(a.status||'pending')+'</span></div><p>'+esc(a.date)+' · '+esc(a.time)+' Nepal time<br>'+esc(a.reason)+'</p>'+(['pending','confirmed'].includes(a.status)?'<form data-reschedule-appointment="'+esc(a.id)+'"><div class="field"><label>New date</label><input name="date" type="date" min="'+nepalToday()+'" required></div><div class="field"><label>New time</label><select name="time" required><option value="">Choose time</option>'+times+'</select></div><button class="button button-secondary" type="submit">Reschedule appointment</button> <button class="button button-secondary" type="button" data-cancel-appointment="'+esc(a.id)+'">Cancel appointment</button></form>':'')+'</article>').join(''):'<div class="panel-card">No appointments yet.</div>'));
+  const appointmentForm=$('#vet-appointment-form');
+  if(appointmentForm){const refresh=()=>refreshVetAvailability(appointmentForm);appointmentForm.querySelector('[name="date"]')?.addEventListener('change',refresh);appointmentForm.querySelector('[name="vetId"]')?.addEventListener('change',refresh);}
  }else return false;
  }catch(e){app.innerHTML=page('Account features','Could not load page',e.message||'Please try again.','<a class="button button-secondary" href="#account">Back to account</a>');}
  return true;
