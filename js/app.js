@@ -31,6 +31,8 @@ const PAGE_SIZE = 12;
 let nearMeEnabled = false;
 let shopperGeo = null;
 let lastSearchSuggestions = [];
+const productReviewCache = new Map();
+let locationPermissionRequested = false;
 const SEARCH_HISTORY_KEY = 'pashughar.searchHistory.v1';
 let activeShopFiltersVisible = false;
 let sellerTab = 'products';
@@ -197,19 +199,37 @@ function renderSearchSuggestionItems(query) {
   host.hidden=false;
 }
 
+function imageSrcset(url) {
+  try {
+    const parsed=new URL(String(url||''));
+    if(parsed.hostname==='images.unsplash.com'){
+      return [320,640,960].map(width=>{const copy=new URL(parsed.href);copy.searchParams.set('auto','format');copy.searchParams.set('fit','crop');copy.searchParams.set('w',String(width));copy.searchParams.set('q','80');return copy.href+' '+width+'w';}).join(', ');
+    }
+  } catch {}
+  return '';
+}
+function sellerIsVerified(product) {
+  const seller=store.retailers().find(r=>(r.ownerId||r.id)===product.retailerId);
+  return Boolean(seller&&seller.status==='approved');
+}
 const productCard = p => {
-  const canonicalCategory = normalizeCategoryId(p.category);
-  const cardCategory = CATEGORIES.some(category => category.id === canonicalCategory) ? canonicalCategory : 'other';
+  const canonicalCategory=normalizeCategoryId(p.category);
+  const cardCategory=CATEGORIES.some(category=>category.id===canonicalCategory)?canonicalCategory:'other';
+  const imageUrl=p.image||'';
+  const srcset=imageSrcset(imageUrl);
+  const reviewData=productReviewCache.get(p.id);
+  const reviewBadge=reviewData&&reviewData.length?'<span class="card-rating" aria-label="Rating '+(reviewData.reduce((sum,r)=>sum+Number(r.rating||0),0)/reviewData.length).toFixed(1)+' out of 5">★ '+(reviewData.reduce((sum,r)=>sum+Number(r.rating||0),0)/reviewData.length).toFixed(1)+' <small>('+reviewData.length+')</small></span>':'';
   return `
   <article class="product-card product-card--${cardCategory}">
-    <div class="product-image-wrap"><a href="${publicProductUrl(p)}" aria-label="View ${safe(p.name)}"><img class="product-image" src="${safe(p.image || '')}" alt="${safe(p.name)}" loading="lazy" onerror="this.style.display='none';this.parentElement.style.background='#edf1e8'"></a>
+    <div class="product-image-wrap"><a href="${publicProductUrl(p)}" aria-label="View ${safe(p.name)}"><img class="product-image" src="${safe(imageUrl)}" ${srcset?'srcset="'+safe(srcset)+'" sizes="(max-width: 600px) 50vw, (max-width: 1000px) 33vw, 25vw"':''} width="640" height="550" alt="${safe(p.name)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.classList.add('image-failed');this.alt='Image unavailable for ${safe(p.name)}'"></a>
       <span class="product-badge ${isAvailable(p)?'':'sold-out'}">${isAvailable(p)?(p.isNew?'JUST ADDED':'IN STOCK'):'SOLD OUT'}</span>
-      <button class="wishlist-button" data-action="wishlist" data-id="${safe(p.id)}" aria-label="Add ${safe(p.name)} to wishlist">${store.wishlist().includes(p.id)?'♥':'♡'}</button>
+      <button class="wishlist-button ${store.wishlist().includes(p.id)?'is-saved':''}" data-action="wishlist" data-id="${safe(p.id)}" aria-label="${store.wishlist().includes(p.id)?'Remove':'Add'} ${safe(p.name)} ${store.wishlist().includes(p.id)?'from':'to'} wishlist" aria-pressed="${store.wishlist().includes(p.id)?'true':'false'}">${store.wishlist().includes(p.id)?'♥':'♡'}</button>
     </div>
-    <div class="product-content"><div class="product-store"><span class="store-dot"></span>${safe(p.retailer || 'Local retailer')}</div>
+    <div class="product-content"><div class="product-store"><span class="store-dot"></span><span>${safe(p.retailer||'Local retailer')}</span>${sellerIsVerified(p)?'<span class="verified-badge" title="Verified retailer">✓ Verified</span>':''}</div>
       <a href="${publicProductUrl(p)}"><h3 class="product-title">${safe(p.name)}</h3></a>
-      <div class="product-meta"><span>${safe(p.location || 'Nepal')}</span><span>${safe(categoryName(canonicalCategory))}</span></div>
-      <div class="product-bottom"><div><span class="product-price">${money(p.price)}</span><span class="product-unit"> / ${safe(p.unit || 'item')}</span></div><button class="add-button" data-action="add-cart" data-id="${safe(p.id)}" aria-label="Add to cart" ${isAvailable(p)?'':'disabled'}>${isAvailable(p)?'+':'−'}</button></div>
+      <div class="product-meta"><span>${safe(p.location||'Nepal')}</span><span>${safe(categoryName(canonicalCategory))}</span></div>
+      ${reviewBadge}
+      <div class="product-bottom"><div><span class="product-price">${money(p.price)}</span><span class="product-unit"> / ${safe(p.unit||'item')}</span></div><button class="add-button" data-action="add-cart" data-id="${safe(p.id)}" aria-label="Add ${safe(p.name)} to basket" ${isAvailable(p)?'':'disabled'}>${isAvailable(p)?'＋ Add':'Sold out'}</button></div>
     </div>
   </article>`;
 };
@@ -290,28 +310,52 @@ function renderHome() {
     <div class="hero-visual"><img src="https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1200&q=85" alt="Green farmland and agricultural fields" fetchpriority="high"><div class="hero-sticker"><strong>All together.</strong><span>From farm essentials to pet favourites.</span></div><div class="hero-image-label"><span>Welcome to Pashughar</span><h2>Closer to the things you care for.</h2><p>Shop from a growing community of animal and farm retailers.</p></div></div></div></section>
     <section class="category-section"><div class="container">${sectionHeading('Browse the marketplace','What are you looking for?','Choose a category to start.')}</div><div class="container category-grid">${CATEGORIES.map(c=>`<a class="category-card category-card--${c.id}" href="${c.id==='pets-supplies'?'#pets':'#shop?category='+c.id}" style="--category-accent:${c.palette.accent};--category-deep:${c.palette.deep};--category-wash:${c.palette.wash}"><img class="category-photo" src="${safe(c.image)}" alt="" loading="lazy"><span class="category-card-copy"><span class="category-kicker">${safe(c.kicker)}</span><h3>${safe(c.name)}</h3><p>${safe(c.cardDescription)}</p><span class="category-card-link">Explore category <span aria-hidden="true">↗</span></span></span></a>`).join('')}</div></section>
     <section class="products-section"><div class="container">${sectionHeading('Picked for you','Recently added','New listings from participating retailers.','View all products')}<div class="product-grid">${featured.map(productCard).join('')}</div>${featured.length===0?(catalogueLoaded?emptyState('⌕','No products yet','Approved product listings will appear here.','#seller','Join as a retailer'):productSkeletons()):''}</div></section>
-    <section class="trust-strip"><div class="container trust-grid"><div class="trust-item"><div class="trust-icon">♧</div><div><strong>A wider choice</strong><span>Products from multiple retailers</span></div></div><div class="trust-item"><div class="trust-icon">✓</div><div><strong>Clear availability</strong><span>Know what is in stock before ordering</span></div></div><div class="trust-item"><div class="trust-icon">⌖</div><div><strong>Local marketplace</strong><span>Discover sellers around Nepal</span></div></div><div class="trust-item"><div class="trust-icon">♡</div><div><strong>Animal needs, together</strong><span>From livestock to everyday pet care</span></div></div></div></section>
+    ${renderSearchTrends()}<section class="trust-strip"><div class="container trust-grid"><div class="trust-item"><div class="trust-icon">♧</div><div><strong>A wider choice</strong><span>Products from multiple retailers</span></div></div><div class="trust-item"><div class="trust-icon">✓</div><div><strong>Clear availability</strong><span>Know what is in stock before ordering</span></div></div><div class="trust-item"><div class="trust-icon">⌖</div><div><strong>Local marketplace</strong><span>Discover sellers around Nepal</span></div></div><div class="trust-item"><div class="trust-icon">♡</div><div><strong>Animal needs, together</strong><span>From livestock to everyday pet care</span></div></div></div></section>
     <section class="seller-cta"><div class="container"><div class="seller-cta-inner"><div><div class="eyebrow">For retailers and suppliers</div><h2>Bring your animal products to more people.</h2><p>List your products, manage stock and keep orders organized with your own retailer workspace.</p></div><a href="#seller" class="button">Start selling on Pashughar <span>→</span></a></div></div></section>`;
 }
 
 function renderShop(params = new URLSearchParams()) {
-  activeShopCategory = normalizeCategoryId(params.get('category') || activeShopCategory || '');
-  activeShopQuery = params.get('q') ?? activeShopQuery;
-  const sectionCategory = CATEGORIES.find(category => category.id === activeShopCategory);
-  if (sectionCategory) app.dataset.sectionTheme = sectionCategory.id;
-  else delete app.dataset.sectionTheme;
-  let items = activeProducts();
-  if(activeShopCategory) items = items.filter(p=>p.category===activeShopCategory);
-  if(activeShopStockOnly) items = items.filter(isAvailable);
-  const q = activeShopQuery.trim().toLowerCase();
-  if(q) items = items.filter(p=>[p.name,p.description,p.retailer,p.location,categoryName(p.category)].join(' ').toLowerCase().includes(q));
-  if(activeShopSort==='price-asc') items.sort((a,b)=>Number(a.price)-Number(b.price));
-  if(activeShopSort==='price-desc') items.sort((a,b)=>Number(b.price)-Number(a.price));
-  if(activeShopSort==='newest') items.sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
-  if(activeShopSort==='name') items.sort((a,b)=>a.name.localeCompare(b.name));
-  const checked = (id) => activeShopCategory===id?'checked':'';
-  const categoryBanner = sectionCategory ? `<section class="category-shop-banner" style="--section-accent:${sectionCategory.palette.accent};--section-deep:${sectionCategory.palette.deep};--section-wash:${sectionCategory.palette.wash};--section-soft:${sectionCategory.palette.soft};--section-warm:${sectionCategory.palette.warm}"><div class="category-shop-copy"><div class="eyebrow">${safe(sectionCategory.kicker)}</div><h1>${safe(sectionCategory.name)}</h1><p>${safe(sectionCategory.description)}. Explore approved listings from local retailers.</p><a href="#shop" class="category-back-link">View all categories <span aria-hidden="true">→</span></a></div><div class="category-shop-image"><img src="${safe(sectionCategory.image)}" alt="" loading="lazy"></div></section>` : `<div class="page-title-row"><div><div class="eyebrow">The Pashughar marketplace</div><h1>Explore all products</h1><p>Find products and livestock offered by local retailers.</p></div></div>`;
-  app.innerHTML = `<div class="page-wrap"><div class="container"><div class="shop-heading-row">${categoryBanner}<button class="button button-secondary mobile-filter-button" data-action="toggle-filters">☷ Filters</button></div>${demoNotice()}<div class="shop-layout"><aside class="filter-panel ${activeShopFiltersVisible?'filters-open':''}" id="filter-panel"><h3>Filter products</h3><div class="filter-group"><h4>Categories</h4><div class="filter-options"><label class="filter-option"><input type="radio" name="category-filter" value="" ${!activeShopCategory?'checked':''}> All categories</label>${CATEGORIES.map(c=>`<label class="filter-option"><input type="radio" name="category-filter" value="${c.id}" ${checked(c.id)}> ${c.name}</label>`).join('')}</div></div><div class="filter-group"><h4>Availability</h4><label class="filter-option"><input type="checkbox" id="stock-filter" ${activeShopStockOnly?'checked':''}> In stock only</label></div><div class="filter-group"><button class="button button-secondary button-wide" data-action="reset-filters">Clear filters</button></div></aside><div><div class="shop-toolbar"><span class="result-count">Showing <strong>${items.length}</strong> product${items.length===1?'':'s'}</span><select id="sort-select" aria-label="Sort products"><option value="featured" ${activeShopSort==='featured'?'selected':''}>Featured</option><option value="newest" ${activeShopSort==='newest'?'selected':''}>Newest first</option><option value="price-asc" ${activeShopSort==='price-asc'?'selected':''}>Price: low to high</option><option value="price-desc" ${activeShopSort==='price-desc'?'selected':''}>Price: high to low</option><option value="name" ${activeShopSort==='name'?'selected':''}>Name A–Z</option></select></div><div class="product-grid">${items.map(productCard).join('')}</div>${items.length===0?(catalogueLoaded?emptyState('⌕','No matching products','Try another search or clear filters to explore more listings.','#shop','Clear and browse all'):productSkeletons()):''}</div></div></div></div>`;
+  activeShopCategory=normalizeCategoryId(params.get('category')||activeShopCategory||'');
+  activeShopQuery=params.has('q')?params.get('q'):activeShopQuery;
+  const all=activeProducts();
+  const sectionCategory=CATEGORIES.find(category=>category.id===activeShopCategory);
+  if(sectionCategory)app.dataset.sectionTheme=sectionCategory.id;else delete app.dataset.sectionTheme;
+  let items=all.slice();
+  if(activeShopCategory)items=items.filter(p=>normalizeCategoryId(p.category)===activeShopCategory);
+  const q=activeShopQuery.trim();
+  if(q)items=items.filter(p=>productMatchesQuery(p,q));
+  if(activeShopStockOnly)items=items.filter(isAvailable);
+  if(activePriceMin!=='')items=items.filter(p=>Number(p.price)>=Number(activePriceMin));
+  if(activePriceMax!=='')items=items.filter(p=>Number(p.price)<=Number(activePriceMax));
+  if(activeProvince)items=items.filter(p=>String(p.attributes?.province||'')===activeProvince);
+  if(activeDistrict)items=items.filter(p=>String(p.attributes?.district||'')===activeDistrict);
+  if(activeMunicipality)items=items.filter(p=>String(p.attributes?.municipality||'')===activeMunicipality);
+  if(nearMeEnabled && shopperGeo)items=items.filter(p=>Number.isFinite(productDistance(p)));
+  if(activeShopSort==='price-asc')items.sort((x,y)=>Number(x.price)-Number(y.price));
+  if(activeShopSort==='price-desc')items.sort((x,y)=>Number(y.price)-Number(x.price));
+  if(activeShopSort==='newest')items.sort((x,y)=>new Date(y.createdAt||0)-new Date(x.createdAt||0));
+  if(activeShopSort==='name')items.sort((x,y)=>String(x.name).localeCompare(String(y.name)));
+  if(activeShopSort==='nearest')items.sort((x,y)=>productDistance(x)-productDistance(y));
+  const total=items.length;
+  const pageCount=Math.max(1,Math.ceil(total/PAGE_SIZE));
+  activeShopPage=Math.max(1,Math.min(activeShopPage,pageCount));
+  const start=(activeShopPage-1)*PAGE_SIZE;
+  const visible=items.slice(start,start+PAGE_SIZE);
+  const checked=id=>activeShopCategory===id?'checked':'';
+  const provinceOptions=locationOptions(all,'province');
+  const districtProducts=activeProvince?all.filter(p=>p.attributes?.province===activeProvince):all;
+  const districtOptions=locationOptions(districtProducts,'district');
+  const municipalityProducts=activeDistrict?districtProducts.filter(p=>p.attributes?.district===activeDistrict):districtProducts;
+  const municipalityOptions=locationOptions(municipalityProducts,'municipality');
+  const selectOptions=(options,current,placeholder)=>'<option value="">'+placeholder+'</option>'+options.map(value=>'<option value="'+safe(value)+'" '+(current===value?'selected':'')+'>'+safe(value)+'</option>').join('');
+  const categoryBanner=sectionCategory
+    ? '<section class="category-shop-banner" style="--section-accent:'+sectionCategory.palette.accent+';--section-deep:'+sectionCategory.palette.deep+';--section-wash:'+sectionCategory.palette.wash+';--section-soft:'+sectionCategory.palette.soft+';--section-warm:'+sectionCategory.palette.warm+'"><div class="category-shop-copy"><div class="eyebrow">'+safe(sectionCategory.kicker)+'</div><h1>'+safe(sectionCategory.name)+'</h1><p>'+safe(sectionCategory.description)+'. Explore approved listings from local retailers.</p><a href="#shop" class="category-back-link">View all categories <span aria-hidden="true">→</span></a></div><div class="category-shop-image"><img src="'+safe(sectionCategory.image)+'" width="640" height="450" alt="" loading="lazy" decoding="async"></div></section>'
+    : '<div class="page-title-row"><div><div class="eyebrow">The Pashughar marketplace</div><h1>Explore all products</h1><p>Find products and livestock offered by local retailers.</p></div></div>';
+  const noResults=total===0
+    ? '<div class="empty-state search-no-results"><div class="empty-state-icon">⌕</div><h2>No matching products</h2><p>Try a shorter phrase, a Nepali word, a wider price range or a nearby district.</p><div class="no-results-actions"><button class="button button-secondary" type="button" data-action="reset-filters">Clear filters</button><button class="button button-primary" type="button" data-action="search-suggestion" data-query="">Browse all products</button></div><div class="search-trend-chips">'+CATEGORIES.slice(0,5).map(c=>'<button type="button" class="search-trend-chip" data-action="set-category" data-category="'+safe(c.id)+'">'+safe(c.name)+'</button>').join('')+'</div></div>'
+    : '';
+  const resultLabel=total?('Showing '+(start+1)+'–'+Math.min(start+PAGE_SIZE,total)+' of '+total+' listings'):'0 listings';
+  app.innerHTML='<div class="page-wrap"><div class="container"><div class="shop-heading-row">'+categoryBanner+'<button class="button button-secondary mobile-filter-button" data-action="toggle-filters">☷ Filters</button></div>'+demoNotice()+'<div class="shop-layout"><aside class="filter-panel '+(activeShopFiltersVisible?'filters-open':'')+'" id="filter-panel"><h3>Filter products</h3><div class="filter-group"><h4>Categories</h4><div class="filter-options"><label class="filter-option"><input type="radio" name="category-filter" value="" '+(!activeShopCategory?'checked':'')+'> All categories</label>'+CATEGORIES.map(c=>'<label class="filter-option"><input type="radio" name="category-filter" value="'+safe(c.id)+'" '+checked(c.id)+'> '+safe(c.name)+'</label>').join('')+'</div></div><div class="filter-group"><h4>Price range (NPR)</h4><div class="price-filter-grid"><label class="filter-option" for="price-min">Min<input id="price-min" type="number" min="0" step="1" value="'+safe(activePriceMin)+'" placeholder="0"></label><label class="filter-option" for="price-max">Max<input id="price-max" type="number" min="0" step="1" value="'+safe(activePriceMax)+'" placeholder="Any"></label></div><button type="button" class="button button-secondary button-small" data-action="apply-price-filter">Apply price</button></div><div class="filter-group"><h4>Location</h4><label class="filter-option" for="province-filter">Province<select id="province-filter">'+selectOptions(provinceOptions,activeProvince,'All provinces')+'</select></label><label class="filter-option" for="district-filter">District<select id="district-filter">'+selectOptions(districtOptions,activeDistrict,'All districts')+'</select></label><label class="filter-option" for="municipality-filter">Municipality<select id="municipality-filter">'+selectOptions(municipalityOptions,activeMunicipality,'All municipalities')+'</select></label><button type="button" class="button button-secondary button-small" data-action="near-me">'+(nearMeEnabled?'✓ Near me enabled':'⌖ Near me')+'</button><p class="small-muted">'+(nearMeEnabled?'Showing listings with coordinates.': 'Uses your device location only after you approve the browser prompt.')+'</p></div><div class="filter-group"><h4>Availability</h4><label class="filter-option"><input type="checkbox" id="stock-filter" '+(activeShopStockOnly?'checked':'')+'> In stock only</label></div><div class="filter-group"><button class="button button-secondary button-wide" data-action="reset-filters">Clear filters</button></div></aside><div class="shop-results-column"><div class="shop-toolbar"><span class="result-count">'+resultLabel+'</span><select id="sort-select" aria-label="Sort products"><option value="featured" '+(activeShopSort==='featured'?'selected':'')+'>Featured</option><option value="newest" '+(activeShopSort==='newest'?'selected':'')+'>Newest first</option><option value="price-asc" '+(activeShopSort==='price-asc'?'selected':'')+'>Price: low to high</option><option value="price-desc" '+(activeShopSort==='price-desc'?'selected':'')+'>Price: high to low</option><option value="nearest" '+(activeShopSort==='nearest'?'selected':'')+' '+(!nearMeEnabled?'disabled':'')+'>Nearest to me</option><option value="name" '+(activeShopSort==='name'?'selected':'')+'>Name A–Z</option></select></div><div class="product-grid">'+visible.map(productCard).join('')+'</div>'+noResults+(total>PAGE_SIZE?'<nav class="listing-pagination" aria-label="Product pages"><button type="button" class="button button-secondary" data-action="page-listings" data-page="'+(activeShopPage-1)+'" '+(activeShopPage<=1?'disabled':'')+'>← Previous</button><span>Page '+activeShopPage+' of '+pageCount+'</span><button type="button" class="button button-secondary" data-action="page-listings" data-page="'+(activeShopPage+1)+'" '+(activeShopPage>=pageCount?'disabled':'')+'>Next →</button></nav>':'')+'</div></div></div></div>';
 }
 
 function renderProduct(id) {
