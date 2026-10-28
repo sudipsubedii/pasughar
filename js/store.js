@@ -5,7 +5,8 @@ const STORAGE_KEYS = {
   session: 'pashughar.demoSession.v1',
   wishlist: 'pashughar.wishlist.v1',
   retailers: 'pashughar.retailers.v1',
-  reports: 'pashughar.reports.v1'
+  reports: 'pashughar.reports.v1',
+  breedingBookings: 'pashughar.breedingBookings.v1'
 };
 
 let persistenceAdapter = null;
@@ -35,7 +36,7 @@ function readJson(key, fallback) {
 function writeJson(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
 function initializeStore() {
   if (!localStorage.getItem(STORAGE_KEYS.products)) writeJson(STORAGE_KEYS.products, SEEDED_PRODUCTS);
-  for (const [key, fallback] of [[STORAGE_KEYS.cart, []],[STORAGE_KEYS.orders, []],[STORAGE_KEYS.wishlist, []],[STORAGE_KEYS.retailers, []],[STORAGE_KEYS.reports, []]]) {
+  for (const [key, fallback] of [[STORAGE_KEYS.cart, []],[STORAGE_KEYS.orders, []],[STORAGE_KEYS.wishlist, []],[STORAGE_KEYS.retailers, []],[STORAGE_KEYS.reports, []],[STORAGE_KEYS.breedingBookings, []]]) {
     if (!localStorage.getItem(key)) writeJson(key, fallback);
   }
 }
@@ -65,6 +66,8 @@ export const store = {
   saveRetailers: (items) => { const previous = readJson(STORAGE_KEYS.retailers, []); writeJson(STORAGE_KEYS.retailers, items); return persistCloud('retailers', previous, items); },
   reports: () => readJson(STORAGE_KEYS.reports, []),
   saveReports: (items) => writeJson(STORAGE_KEYS.reports, items),
+  breedingBookings: () => readJson(STORAGE_KEYS.breedingBookings, []),
+  saveBreedingBookings: (items) => writeJson(STORAGE_KEYS.breedingBookings, items),
   resetDemo: () => { Object.values(STORAGE_KEYS).forEach(k => localStorage.removeItem(k)); initializeStore(); }
 };
 // Each marketplace category has its own palette, inspired by the user's visual references.
@@ -109,7 +112,7 @@ export const safe = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&'
 
 // Cloud snapshots update the local cache without triggering write-back loops.
 export function hydrateCollection(name, items) {
-  const key = ({ products: STORAGE_KEYS.products, retailers: STORAGE_KEYS.retailers, orders: STORAGE_KEYS.orders, reports: STORAGE_KEYS.reports })[name];
+  const key = ({ products: STORAGE_KEYS.products, retailers: STORAGE_KEYS.retailers, orders: STORAGE_KEYS.orders, reports: STORAGE_KEYS.reports, breedingBookings: STORAGE_KEYS.breedingBookings })[name];
   if (!key) throw new Error(`Unknown cache collection: ${name}`);
   writeJson(key, Array.isArray(items) ? items : []);
   try { window.dispatchEvent(new CustomEvent('pashughar:cloud-updated', { detail: { name, count: Array.isArray(items) ? items.length : 0 } })); } catch {}
