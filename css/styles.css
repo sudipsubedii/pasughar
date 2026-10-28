@@ -199,3 +199,18 @@ body[data-theme="dark"] .verification-card,body[data-theme="dark"] .report-card{
  .route-context{padding:12px 18px;gap:10px}
 }
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.back-to-top{transition:none}}
+
+/* Unified customer/retailer authentication and account screens */
+.auth-unified .auth-mode-tabs,.auth-unified .auth-channel-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:16px 0}
+.auth-mode-tabs button,.auth-channel-tabs button{border:1px solid var(--line);border-radius:11px;background:var(--canvas);color:var(--ink);padding:11px 12px;font:700 12px inherit;cursor:pointer}
+.auth-mode-tabs button.active,.auth-channel-tabs button.active{background:var(--green);border-color:var(--green);color:#fff}
+.remember-choice{display:flex;align-items:center;gap:9px;margin:12px 0 18px;color:var(--muted);font-size:12px}
+.remember-choice input{width:16px;height:16px;accent-color:var(--green)}
+.auth-unified #phone-recaptcha-container{min-height:1px}
+.account-page-card{max-width:760px;margin:40px auto;padding:clamp(24px,5vw,48px);border:1px solid var(--line);border-radius:24px;background:var(--paper);box-shadow:var(--shadow-soft)}
+.account-page-card h1{font-size:clamp(30px,4vw,42px);margin:18px 0 8px}
+.account-user-name{font-size:18px;font-weight:800;margin:8px 0}
+.account-actions{display:flex;gap:12px;flex-wrap:wrap;margin:24px 0}
+.cloud-error-banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:16px auto;padding:14px 18px;max-width:1100px;border:1px solid #d88f72;border-radius:14px;background:#fff2ec;color:#602819;font-size:12px}
+.cloud-error-banner span{flex:1}
+body[data-theme="dark"] .cloud-error-banner{background:#3c2723;color:#ffdbcf;border-color:#7e4a3c}
