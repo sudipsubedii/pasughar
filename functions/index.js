@@ -766,7 +766,7 @@ exports.saveAdminCategory = onCall(async request => {
   if (!/^[a-z0-9][a-z0-9-]{1,59}$/.test(id) || !name || !description) {
     throw new HttpsError('invalid-argument','Use a valid category ID, name and description.');
   }
-  if (image && !/^https:\\/\\//i.test(image)) throw new HttpsError('invalid-argument','Category image must be an HTTPS URL.');
+  if (image && !/^https:\/\//i.test(image)) throw new HttpsError('invalid-argument','Category image must be an HTTPS URL.');
   const paletteIn = input.palette && typeof input.palette === 'object' ? input.palette : {};
   const palette = {};
   for (const key of ['accent','deep','wash','soft','warm','contrast']) {
@@ -816,7 +816,7 @@ exports.saveAdminSiteSettings = onCall(async request => {
     || !Number.isFinite(commissionPercent) || commissionPercent < 0 || commissionPercent > 100) {
     throw new HttpsError('invalid-argument','Delivery charge must be 0–100,000 NPR and commission must be 0–100%.');
   }
-  if (bannerImage && !/^https:\\/\\//i.test(bannerImage)) throw new HttpsError('invalid-argument','Banner image must be an HTTPS URL.');
+  if (bannerImage && !/^https:\/\//i.test(bannerImage)) throw new HttpsError('invalid-argument','Banner image must be an HTTPS URL.');
   const data = {announcementText,bannerTitle,bannerText,bannerImage,announcementEnabled,deliveryCharge,commissionPercent,updatedBy:actor.uid,updatedAt:FieldValue.serverTimestamp()};
   await db.collection('platformSettings').doc('public').set(data,{merge:true});
   await db.collection('auditLogs').add({actorId:actor.uid,action:'site_settings_updated',targetId:'public',reason:'deliveryCharge='+deliveryCharge+'; commissionPercent='+commissionPercent,createdAt:FieldValue.serverTimestamp()});
@@ -839,7 +839,7 @@ exports.saveAdminProduct = onCall(async request => {
   const stock = Number(input.stock);
   const retailerId = cleanId(input.retailerId,160);
   if (!name || !description || !category || !imageUrl || !retailerId
-    || !/^https:\\/\\//i.test(imageUrl) || !Number.isFinite(price) || price <= 0 || price > 100000000
+    || !/^https:\/\//i.test(imageUrl) || !Number.isFinite(price) || price <= 0 || price > 100000000
     || !Number.isFinite(stock) || stock < 0 || stock > 1000000
     || (!['kg','litre'].includes(unit.toLowerCase()) && !Number.isInteger(stock))
     || (['kg','litre'].includes(unit.toLowerCase()) && Math.abs(stock*2-Math.round(stock*2)) > 0.00001)) {
