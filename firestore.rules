@@ -61,7 +61,7 @@ service cloud.firestore {
     match /retailers/{retailerId} {
       allow read: if isOwner(retailerId) || isAdmin();
       allow create: if isOwner(retailerId) && hasRetailerRole()
-        && request.resource.data.keys().hasOnly(['ownerId','storeName','contactName','email','phone','location','description','status','createdAt','updatedAt'])
+        && request.resource.data.keys().hasOnly(['ownerId','storeName','contactName','email','phone','location','description','status','createdAt','updatedAt','openingHours','publicPhone','publicEmail','website','vetSpecialties','vetAvailability','consultationFee','verificationDocs'])
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.status == 'pending'
         && request.resource.data.storeName is string && request.resource.data.storeName.size() > 0
@@ -72,7 +72,7 @@ service cloud.firestore {
       allow update: if isAdmin() || (isOwner(retailerId) && hasRetailerRole()
         && request.resource.data.ownerId == resource.data.ownerId
         && request.resource.data.status == resource.data.status
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['description','phone','location','updatedAt']));
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['description','phone','location','updatedAt','openingHours','publicPhone','publicEmail','website','vetSpecialties','vetAvailability','consultationFee','verificationDocs']));
       allow delete: if isAdmin();
     }
 
@@ -153,6 +153,43 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','updatedAt'])
           && request.resource.data.status in ['accepted','declined','completed','cancelled']);
       allow delete: if isAdmin();
+    }
+
+
+    match /enquiries/{enquiryId} {
+      allow create: if hasVerifiedContact()
+        && request.resource.data.keys().hasOnly(['productId','productName','retailerId','customerUid','customerName','customerEmail','customerPhone','message','reply','status','createdAt','updatedAt'])
+        && request.resource.data.customerUid == request.auth.uid
+        && request.resource.data.productId is string
+        && request.resource.data.retailerId is string
+        && request.resource.data.message is string
+        && request.resource.data.message.size() >= 5
+        && request.resource.data.message.size() <= 1500
+        && request.resource.data.status == 'open'
+        && request.resource.data.reply == ''
+        && exists(/databases/$(database)/documents/products/$(request.resource.data.productId))
+        && get(/databases/$(database)/documents/products/$(request.resource.data.productId)).data.status == 'approved'
+        && get(/databases/$(database)/documents/products/$(request.resource.data.productId)).data.retailerId == request.resource.data.retailerId;
+      allow read: if isAdmin()
+        || (signedIn() && resource.data.customerUid == request.auth.uid)
+        || (signedIn() && resource.data.retailerId == request.auth.uid);
+      allow update: if isAdmin()
+        || (signedIn() && resource.data.retailerId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reply','status','updatedAt'])
+          && request.resource.data.reply is string
+          && request.resource.data.reply.size() <= 1500
+          && request.resource.data.status in ['open','replied']);
+      allow delete: if isAdmin();
+    }
+
+    match /publicStores/{storeId} {
+      allow read: if true;
+      allow create, update: if isOwner(storeId) && hasRetailerRole()
+        && exists(retailerPath(storeId))
+        && get(retailerPath(storeId)).data.status == 'approved'
+        && request.resource.data.keys().hasOnly(['storeId','storeName','description','location','publicPhone','publicEmail','website','openingHours','vetSpecialties','vetAvailability','consultationFee','isVet','updatedAt'])
+        && request.resource.data.storeId == request.auth.uid;
+      allow delete: if isAdmin() || isOwner(storeId);
     }
 
     match /reviews/{reviewId} {
