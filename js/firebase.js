@@ -255,6 +255,7 @@ async function writePublicStore(retailer) {
     openingHours:String(retailer.openingHours||'').slice(0,700),
     vetSpecialties:Array.isArray(retailer.vetSpecialties)?retailer.vetSpecialties.slice(0,20):[],
     vetAvailability:String(retailer.vetAvailability||'').slice(0,700),
+    vetAppointmentSlots:Array.isArray(retailer.vetAppointmentSlots)?retailer.vetAppointmentSlots.map(x=>String(x).trim()).filter(x=>/^([01]\\d|2[0-3]):[0-5]\\d$/.test(x)).slice(0,24):[],
     consultationFee:Math.max(0,Number(retailer.consultationFee)||0),
     isVet:Boolean(retailer.isVet),
     updatedAt:serverTimestamp()
