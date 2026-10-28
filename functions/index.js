@@ -504,3 +504,135 @@ exports.sendVetAppointmentReminders = onSchedule('every 15 minutes', async () =>
     });
   }
 });
+
+
+function validateVetSlot(date, time) {
+  if (typeof date !== 'string' || !/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) {
+    throw new HttpsError('invalid-argument', 'Choose a valid appointment date.');
+  }
+  if (typeof time !== 'string' || !/^(?:09|1[0-6]):(?:00|30)$/.test(time)) {
+    throw new HttpsError('invalid-argument', 'Choose a listed half-hour slot between 09:00 and 16:30 Nepal time.');
+  }
+  const startAt = new Date(date + 'T' + time + ':00+05:45');
+  if (!Number.isFinite(startAt.getTime()) || startAt.getTime() <= Date.now()) {
+    throw new HttpsError('failed-precondition', 'Appointment must be scheduled for a future time.');
+  }
+  return startAt;
+}
+function vetSlotKey(vetId, date, time) {
+  return hash(vetId + ':' + date + ':' + time).slice(0, 40);
+}
+function vetAppointmentInput(request) {
+  const auth = requireAuth(request);
+  if (!(auth.token.email_verified === true || (typeof auth.token.phone_number === 'string' && auth.token.phone_number.trim()))) {
+    throw new HttpsError('failed-precondition', 'Verify your email or phone number before booking.');
+  }
+  const vetId = cleanId(request.data && request.data.vetId, 160);
+  const date = asText(request.data && request.data.date, 10);
+  const time = asText(request.data && request.data.time, 5);
+  const reason = asText(request.data && request.data.reason, 1000);
+  if (!vetId || reason.length < 5) throw new HttpsError('invalid-argument', 'Choose a clinic and describe the reason for the visit.');
+  const startAt = validateVetSlot(date, time);
+  return {auth, vetId, date, time, reason, startAt, slotKey:vetSlotKey(vetId,date,time)};
+}
+
+exports.createVetAppointment = onCall(async request => {
+  const input = vetAppointmentInput(request);
+  const appointmentRef = db.collection('vetAppointments').doc();
+  const slotRef = db.collection('vetAppointmentSlots').doc(input.slotKey);
+  await db.runTransaction(async tx => {
+    const [slotSnap, vetSnap] = await Promise.all([
+      tx.get(slotRef), tx.get(db.collection('publicStores').doc(input.vetId))
+    ]);
+    if (!vetSnap.exists || vetSnap.data().isVet !== true) throw new HttpsError('failed-precondition', 'This veterinary clinic is not currently accepting appointments.');
+    if (slotSnap.exists) throw new HttpsError('already-exists', 'That time slot is already requested. Choose another.');
+    const vet = vetSnap.data();
+    const customerName = asText(input.auth.token.name || input.auth.token.email || input.auth.token.phone_number || 'Customer', 120);
+    tx.create(slotRef, {vetId:input.vetId,date:input.date,time:input.time,appointmentId:appointmentRef.id,createdAt:FieldValue.serverTimestamp()});
+    tx.create(appointmentRef, {
+      customerUid:input.auth.uid, customerName, vetId:input.vetId,
+      vetName:asText(vet.storeName || 'Veterinary clinic',120),
+      date:input.date,time:input.time,startAt:input.startAt.toISOString(),
+      slotKey:input.slotKey,reason:input.reason,status:'pending',
+      remindersSent:[],createdAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()
+    });
+  });
+  return {appointmentId:appointmentRef.id,status:'pending'};
+});
+
+exports.cancelVetAppointment = onCall(async request => {
+  const auth = requireAuth(request);
+  const appointmentId = cleanId(request.data && request.data.appointmentId, 160);
+  if (!appointmentId) throw new HttpsError('invalid-argument', 'Appointment ID is required.');
+  const ref = db.collection('vetAppointments').doc(appointmentId);
+  await db.runTransaction(async tx => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new HttpsError('not-found', 'Appointment not found.');
+    const appointment = snap.data();
+    if (appointment.customerUid !== auth.uid && !isAdmin(auth)) throw new HttpsError('permission-denied', 'You can cancel only your own appointment.');
+    if (!['pending','confirmed'].includes(appointment.status)) throw new HttpsError('failed-precondition', 'This appointment can no longer be cancelled.');
+    const slotRef = appointment.slotKey ? db.collection('vetAppointmentSlots').doc(appointment.slotKey) : null;
+    const slotSnap = slotRef ? await tx.get(slotRef) : null;
+    tx.update(ref,{status:'cancelled',updatedAt:FieldValue.serverTimestamp()});
+    if (slotRef && slotSnap && slotSnap.exists && slotSnap.data().appointmentId === appointmentId) tx.delete(slotRef);
+  });
+  return {appointmentId,status:'cancelled'};
+});
+
+exports.rescheduleVetAppointment = onCall(async request => {
+  const auth = requireAuth(request);
+  const appointmentId = cleanId(request.data && request.data.appointmentId,160);
+  const date = asText(request.data && request.data.date,10);
+  const time = asText(request.data && request.data.time,5);
+  const startAt = validateVetSlot(date,time);
+  if (!appointmentId) throw new HttpsError('invalid-argument','Appointment ID is required.');
+  const oldRef = db.collection('vetAppointments').doc(appointmentId);
+  const newRef = db.collection('vetAppointments').doc();
+  await db.runTransaction(async tx => {
+    const oldSnap = await tx.get(oldRef);
+    if (!oldSnap.exists) throw new HttpsError('not-found','Appointment not found.');
+    const old = oldSnap.data();
+    if (old.customerUid !== auth.uid) throw new HttpsError('permission-denied','You can reschedule only your own appointment.');
+    if (!['pending','confirmed'].includes(old.status)) throw new HttpsError('failed-precondition','This appointment can no longer be rescheduled.');
+    const newKey = vetSlotKey(old.vetId,date,time);
+    const oldSlotRef = old.slotKey ? db.collection('vetAppointmentSlots').doc(old.slotKey) : null;
+    const newSlotRef = db.collection('vetAppointmentSlots').doc(newKey);
+    const oldSlotSnap = oldSlotRef ? await tx.get(oldSlotRef) : null;
+    const newSlotSnap = await tx.get(newSlotRef);
+    if (newSlotSnap.exists) throw new HttpsError('already-exists','That time slot is already requested. Choose another.');
+    tx.update(oldRef,{status:'cancelled',updatedAt:FieldValue.serverTimestamp()});
+    if (oldSlotRef && oldSlotSnap && oldSlotSnap.exists && oldSlotSnap.data().appointmentId === appointmentId) tx.delete(oldSlotRef);
+    tx.create(newSlotRef,{vetId:old.vetId,date,time,appointmentId:newRef.id,createdAt:FieldValue.serverTimestamp()});
+    tx.create(newRef,{
+      ...old,date,time,startAt:startAt.toISOString(),slotKey:newKey,status:'pending',
+      rescheduledFrom:appointmentId,remindersSent:[],createdAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()
+    });
+  });
+  return {appointmentId:newRef.id,status:'pending'};
+});
+
+exports.updateVetAppointmentStatus = onCall(async request => {
+  const auth = requireAuth(request);
+  const appointmentId = cleanId(request.data && request.data.appointmentId,160);
+  const status = asText(request.data && request.data.status,20);
+  if (!appointmentId || !['confirmed','declined','completed','cancelled'].includes(status)) throw new HttpsError('invalid-argument','Choose a valid appointment status.');
+  const ref = db.collection('vetAppointments').doc(appointmentId);
+  await db.runTransaction(async tx => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new HttpsError('not-found','Appointment not found.');
+    const appointment = snap.data();
+    const admin = isAdmin(auth);
+    if (!admin && appointment.vetId !== auth.uid) throw new HttpsError('permission-denied','You can manage only appointments assigned to your clinic.');
+    if (!admin) {
+      const retailerSnap = await tx.get(db.collection('retailers').doc(auth.uid));
+      if (!retailerSnap.exists || retailerSnap.data().status !== 'approved') throw new HttpsError('permission-denied','An approved veterinary retailer account is required.');
+    }
+    const transitions = {pending:['confirmed','declined','cancelled'],confirmed:['completed','cancelled'],declined:[],completed:[],cancelled:[]};
+    if (!(transitions[appointment.status] || []).includes(status)) throw new HttpsError('failed-precondition','This appointment status transition is not allowed.');
+    const slotRef = appointment.slotKey ? db.collection('vetAppointmentSlots').doc(appointment.slotKey) : null;
+    const slotSnap = slotRef ? await tx.get(slotRef) : null;
+    tx.update(ref,{status,updatedAt:FieldValue.serverTimestamp(),statusUpdatedBy:auth.uid});
+    if (['declined','cancelled'].includes(status) && slotRef && slotSnap && slotSnap.exists && slotSnap.data().appointmentId === appointmentId) tx.delete(slotRef);
+  });
+  return {appointmentId,status};
+});
