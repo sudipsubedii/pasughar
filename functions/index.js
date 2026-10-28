@@ -306,7 +306,7 @@ exports.updateRetailerOrderStatus = onCall(async request => {
   const auth = requireAuth(request);
   const retailerOrderId = cleanId(request.data && request.data.retailerOrderId, 160);
   const status = asText(request.data && request.data.status, 30);
-  const allowed = ['Pending','Confirmed','Processing','Shipped','Delivered','Cancelled'];
+  const allowed = ['Pending','Confirmed','Rejected','Processing','Shipped','Delivered','Cancelled'];
   if (!retailerOrderId || !allowed.includes(status)) throw new HttpsError('invalid-argument', 'Invalid retailer order or status.');
   const ref = db.collection('retailerOrders').doc(retailerOrderId);
   const snap = await ref.get();
