@@ -230,6 +230,10 @@ export async function getVeterinaryProviders() {
   const snap = await getDocs(query(collection(db,'publicStores'),where('isVet','==',true)));
   return snap.docs.map(d=>({id:d.id,...toPlain(d.data())}));
 }
+export async function getAvailableVetSlots({storeId, appointmentDate, excludeAppointmentId = ''}) {
+  const result = await getCallable('getAvailableVetSlots')({storeId, appointmentDate, excludeAppointmentId});
+  return result.data;
+}
 export async function createVetAppointment({storeId, appointmentDate, slot, customerName, customerPhone, petName, reason}) {
   const result = await getCallable('createVetAppointment')({
     storeId, appointmentDate, slot, customerName, customerPhone, petName, reason
