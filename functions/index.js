@@ -34,7 +34,14 @@ function safeReason(value) {
  * Required data: { items: [{ productId, quantity }], shipping: { name, phone, address, city, email? }, paymentMethod: 'cod' | 'contact_seller' }
  */
 exports.createOrder = onCall(async (request) => {
-  const auth = request.auth || null; // Guest checkout is supported by design.
+  const auth = request.auth || null;
+  const verifiedContact = Boolean(auth && (
+    auth.token.email_verified === true
+    || (typeof auth.token.phone_number === 'string' && auth.token.phone_number.trim().length > 0)
+  ));
+  if (!verifiedContact) {
+    throw new HttpsError('unauthenticated', 'Verify your email or phone before placing an order. Phone OTP checkout does not require a password or separate sign-up form.');
+  }
   const items = request.data && request.data.items;
   const shipping = request.data && request.data.shipping;
   const paymentMethod = request.data && request.data.paymentMethod;
