@@ -182,6 +182,7 @@ export async function submitProductReview({productId,orderId,rating,body}) {
 export async function saveCustomerProfile({displayName, phone}) {
   const user = auth.currentUser;
   if (!user) throw new Error('Sign in before editing your profile.');
+  await ensureUserProfile(user, 'customer');
   const name = String(displayName || '').trim();
   const contactPhone = String(phone || '').trim();
   if (!name || name.length > 100) throw new Error('Enter a name of 1 to 100 characters.');
