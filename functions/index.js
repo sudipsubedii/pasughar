@@ -762,6 +762,7 @@ exports.saveAdminCategory = onCall(async request => {
   const description = asText(input.description,400);
   const cardDescription = asText(input.cardDescription || description,180);
   const image = asText(input.image,2048);
+  const active = input.active !== false;
   if (!/^[a-z0-9][a-z0-9-]{1,59}$/.test(id) || !name || !description) {
     throw new HttpsError('invalid-argument','Use a valid category ID, name and description.');
   }
@@ -776,7 +777,7 @@ exports.saveAdminCategory = onCall(async request => {
   const ref = db.collection('categories').doc(id);
   const previous = await ref.get();
   await ref.set({
-    id,name,short,icon,kicker,description,cardDescription,
+    id,name,short,icon,kicker,description,cardDescription,active,
     image:image || (previous.exists ? asText(previous.data().image,2048) : ''),
     ...(Object.keys(palette).length ? {palette} : {}),
     createdAt:previous.exists ? previous.data().createdAt : FieldValue.serverTimestamp(),
@@ -790,13 +791,11 @@ exports.deleteAdminCategory = onCall(async request => {
   const actor = requireAdmin(request);
   const id = cleanId(request.data && request.data.id,60);
   if (!id) throw new HttpsError('invalid-argument','Category ID is required.');
-  const baseCategories = ['livestock','pets-supplies','meat','animal-products','animal-care'];
-  if (baseCategories.includes(id)) throw new HttpsError('failed-precondition','Built-in categories cannot be deleted; edit them or hide them by changing the site navigation instead.');
   const usage = await db.collection('products').where('category','==',id).limit(1).get();
-  if (!usage.empty) throw new HttpsError('failed-precondition','This category is used by at least one listing. Reassign those listings before deleting it.');
-  await db.collection('categories').doc(id).delete();
-  await db.collection('auditLogs').add({actorId:actor.uid,action:'category_deleted',targetId:id,createdAt:FieldValue.serverTimestamp()});
-  return {id,deleted:true};
+  if (!usage.empty) throw new HttpsError('failed-precondition','This category is used by at least one listing. Reassign those listings before hiding it.');
+  await db.collection('categories').doc(id).set({id,active:false,updatedAt:FieldValue.serverTimestamp(),updatedBy:actor.uid},{merge:true});
+  await db.collection('auditLogs').add({actorId:actor.uid,action:'category_hidden',targetId:id,createdAt:FieldValue.serverTimestamp()});
+  return {id,deleted:true,active:false};
 });
 
 exports.saveAdminSiteSettings = onCall(async request => {
