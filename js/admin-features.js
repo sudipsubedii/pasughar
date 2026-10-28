@@ -119,16 +119,33 @@ async function renderAnalytics(host){
  const revenue=orders.reduce((sum,o)=>sum+Number(o.total||o.subtotal||0),0);
  const delivered=orders.filter(o=>o.status==='Delivered').reduce((sum,o)=>sum+Number(o.total||o.subtotal||0),0);
  const buckets=new Map();
- orders.forEach(o=>{const d=o.createdAt?.toDate?o.createdAt.toDate():new Date(o.createdAt||'');if(Number.isNaN(d.getTime()))return;const key=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');const b=buckets.get(key)||{month:key,orders:0,value:0};b.orders++;b.value+=Number(o.total||o.subtotal||0);buckets.set(key,b);});
+ orders.forEach(o=>{
+  const d=o.createdAt?.toDate?o.createdAt.toDate():new Date(o.createdAt||'');
+  if(Number.isNaN(d.getTime()))return;
+  const key=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+  const row=buckets.get(key)||{month:key,orders:0,value:0};
+  row.orders++;row.value+=Number(o.total||o.subtotal||0);buckets.set(key,row);
+ });
  const categoryRows=new Map();
- products.forEach(p=>{const key=p.category||'other';const row=categoryRows.get(key)||{category:key,listings:0,stock:0};row.listings++;row.stock+=Number(p.stock)||0;categoryRows.set(key,row);});
- host.innerHTML='<div class="metric-grid">'+[['Users',userResponse.users?.length||0],['Retailers',retailers.length],['Listings',products.length],['Order value',npr(revenue)],['Delivered value',npr(delivered)],['Reports awaiting review',reports.filter(r=>['open','reviewing'].includes(r.status)).length]].map(([a,b])=>'<div class="metric-card"><div class="metric-top">'+esc(a)+'</div><div class="metric-number">'+esc(b)+'</div></div>').join('')+'</div>'+
-  panel('Monthly orders and value','Aggregated from order creation dates. Amounts are order totals, not accounting revenue.',
-    buckets.size?'<div class="table-scroll"><table><thead><tr><th>Month</th><th>Orders</th><th>Order value</th></tr></thead><tbody>'+[...buckets.values()].sort((a,b)=>b.month.localeCompare(a.month)).map(r=>'<tr><td>'+esc(r.month)+'</td><td>'+r.orders+'</td><td>'+npr(r.value)+'</td></tr>').join('')+'</tbody></table></div>':'<p class="small-muted">No dated orders available.</p>')+
-  panel('Catalogue by category','Listings and combined stock by category.',
-    '<div class="table-scroll"><table><thead><tr><th>Category</th><th>Listings</th><th>Stock units</th></tr></thead><tbody>'+[...categoryRows.values()].sort((a,b)=>b.listings-a.listings).map(r=>'<tr><td>'+esc(r.category)+'</td><td>'+r.listings+'</td><td>'+String(r.stock)</td></tr>').join('')+'</tbody></table></div>');
+ products.forEach(p=>{
+  const key=p.category||'other',row=categoryRows.get(key)||{category:key,listings:0,stock:0};
+  row.listings++;row.stock+=Number(p.stock)||0;categoryRows.set(key,row);
+ });
+ const metricData=[
+  ['Users',userResponse.users?.length||0],
+  ['Retailers',retailers.length],
+  ['Listings',products.length],
+  ['Order value',npr(revenue)],
+  ['Delivered value',npr(delivered)],
+  ['Reports awaiting review',reports.filter(r=>['open','reviewing'].includes(r.status)).length]
+ ];
+ const metricHtml='<div class="metric-grid">'+metricData.map(row=>'<div class="metric-card"><div class="metric-top">'+esc(row[0])+'</div><div class="metric-number">'+esc(row[1])+'</div></div>').join('')+'</div>';
+ const months=[...buckets.values()].sort((a,b)=>b.month.localeCompare(a.month));
+ const monthlyHtml=months.length?'<div class="table-scroll"><table><thead><tr><th>Month</th><th>Orders</th><th>Order value</th></tr></thead><tbody>'+months.map(row=>'<tr><td>'+esc(row.month)+'</td><td>'+row.orders+'</td><td>'+npr(row.value)+'</td></tr>').join('')+'</tbody></table></div>':'<p class="small-muted">No dated orders available.</p>';
+ const categories=[...categoryRows.values()].sort((a,b)=>b.listings-a.listings);
+ const categoryHtml=categories.length?'<div class="table-scroll"><table><thead><tr><th>Category</th><th>Listings</th><th>Stock units</th></tr></thead><tbody>'+categories.map(row=>'<tr><td>'+esc(row.category)+'</td><td>'+row.listings+'</td><td>'+String(row.stock)+'</td></tr>').join('')+'</tbody></table></div>':'<p class="small-muted">No product records available.</p>';
+ host.innerHTML=metricHtml+panel('Monthly orders and value','Aggregated from order creation dates. Amounts are order totals, not accounting revenue.',monthlyHtml)+panel('Catalogue by category','Listings and combined stock by category.',categoryHtml);
 }
-
 export function installAdminFeatureHandlers(){
  document.addEventListener('submit',async event=>{
   const form=event.target;
