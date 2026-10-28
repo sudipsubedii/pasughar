@@ -195,7 +195,7 @@ function renderSearchSuggestionItems(query) {
   products.forEach(p=>list.push({type:'Product',label:p.name,meta:money(p.price)+' · '+(p.location||'Nepal'),productId:p.id,query:p.name,image:p.image}));
   lastSearchSuggestions=list.slice(0,8);
   if(!list.length){host.innerHTML='<div class="search-suggestion-empty">No direct matches. Press Enter to search all listings.</div>';host.hidden=false;return;}
-  host.innerHTML=list.slice(0,8).map((item,index)=>'<button type="button" role="option" aria-selected="false" class="search-suggestion-item" data-action="search-suggestion" data-query="'+safe(item.query)+'" '+(item.productId?'data-product-id="'+safe(item.productId)+'"':'')+'><span class="search-suggestion-icon">'+(item.type==='Product'?'⌕':item.type==='Category'?'▦':'↺')+'</span><span class="search-suggestion-copy"><strong>'+safe(item.label)+'</strong>'+(item.meta?'<small>'+safe(item.meta)+'</small>':'')+'</span><small class="search-suggestion-type">'+safe(item.type)+'</small></button>').join('');
+  host.innerHTML=list.slice(0,8).map((item,index)=>'<button type="button" role="option" aria-selected="false" class="search-suggestion-item" data-action="search-suggestion" data-query="'+safe(item.query)+'" '+(item.productId?'data-product-id="'+safe(item.productId)+'"':'')+' '+(item.category?'data-category="'+safe(item.category)+'"':'')+'><span class="search-suggestion-icon">'+(item.type==='Product'?'⌕':item.type==='Category'?'▦':'↺')+'</span><span class="search-suggestion-copy"><strong>'+safe(item.label)+'</strong>'+(item.meta?'<small>'+safe(item.meta)+'</small>':'')+'</span><small class="search-suggestion-type">'+safe(item.type)+'</small></button>').join('');
   host.hidden=false;
 }
 
