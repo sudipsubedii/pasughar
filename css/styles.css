@@ -133,3 +133,30 @@ body[data-theme="dark"] .category-shop-banner:before{content:'';position:absolut
 body[data-theme="dark"] .verification-card,body[data-theme="dark"] .report-card{background:var(--paper);border-color:var(--line)}body[data-theme="dark"] .verification-details>div,body[data-theme="dark"] .report-summary-card,body[data-theme="dark"] .report-details{background:var(--canvas);border-color:var(--line)}
 @media(max-width:800px){.report-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.verification-details{grid-template-columns:1fr}.report-card-top{flex-direction:column}.report-meta{flex-direction:column;gap:5px}}
 @media(max-width:420px){.report-summary-grid{grid-template-columns:1fr}.verification-card{padding:24px 18px}}
+
+/* Pet marketplace hub and dedicated sub-sections */
+.pet-marketplace { padding-top: clamp(28px,5vw,64px); padding-bottom: clamp(42px,7vw,88px); }
+.pet-page-top { max-width: 780px; margin: 0 auto 30px; }
+.pet-page-top .button { margin-bottom: 26px; }
+.pet-page-top h1 { margin: 10px 0 14px; font-size: clamp(2.1rem,5vw,4rem); line-height: 1.02; letter-spacing: -.045em; }
+.pet-page-top p { max-width: 680px; line-height: 1.7; color: var(--muted, #64716a); }
+.pet-section-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:22px; }
+.pet-section-card { display:flex; flex-direction:column; overflow:hidden; border:1px solid var(--line,#e1e8e1); border-radius:24px; background:var(--surface,#fff); color:inherit; text-decoration:none; transition:transform .2s ease,box-shadow .2s ease; }
+.pet-section-card:hover { transform:translateY(-4px); box-shadow:0 18px 44px #183d2b16; }
+.pet-section-image { height:220px; overflow:hidden; background:var(--pet-accent,#d8e4d9); }
+.pet-section-image img { width:100%; height:100%; object-fit:cover; display:block; }
+.pet-section-copy { padding:24px; display:flex; flex:1; flex-direction:column; align-items:flex-start; }
+.pet-section-copy .eyebrow { color:var(--pet-accent); }
+.pet-section-copy h2 { font-size:1.55rem; margin:9px 0; }
+.pet-section-copy p { line-height:1.65; color:var(--muted,#64716a); font-size:.95rem; }
+.pet-section-link { margin-top:auto; padding-top:20px; color:var(--pet-accent); font-weight:750; display:flex; gap:10px; }
+.pet-filter-row { display:flex; gap:10px; flex-wrap:wrap; margin:0 0 26px; }
+.pet-filter-chip { text-decoration:none; border:1px solid var(--line,#dce4dc); border-radius:999px; padding:10px 16px; color:inherit; font-weight:650; }
+.pet-filter-chip.active { background:#174c36; color:#fff; border-color:#174c36; }
+.pet-empty { text-align:center; border:1px dashed var(--line,#dce4dc); border-radius:24px; padding:clamp(32px,6vw,64px) 20px; background:var(--surface,#fff); }
+.pet-empty-icon { font-size:2.8rem; margin-bottom:12px; }
+.pet-empty h2 { margin:0 0 8px; }
+.pet-empty p { max-width:650px; margin:0 auto 22px; color:var(--muted,#64716a); line-height:1.7; }
+.pet-breeding-card .product-meta { flex-wrap:wrap; }
+@media (max-width: 850px) { .pet-section-grid { grid-template-columns:1fr 1fr; } .pet-section-image { height:190px; } }
+@media (max-width: 580px) { .pet-section-grid { grid-template-columns:1fr; } .pet-section-image { height:220px; } .pet-section-copy { padding:20px; } }
