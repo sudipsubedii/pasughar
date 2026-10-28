@@ -263,7 +263,7 @@ service cloud.firestore {
         && request.resource.data.message is string && request.resource.data.message.size() >= 2 && request.resource.data.message.size() <= 1500
         && request.resource.data.createdAt == request.time
         && ((get(/databases/$(database)/documents/enquiries/$(enquiryId)).data.customerUid == request.auth.uid && request.resource.data.senderRole == 'customer')
-          || (get(/databases/$(database)/documents/enquiries/$(enquiryId)).data.retailerId == request.auth.uid && request.resource.data.senderRole == 'retailer'));
+          || (get(/databases/$(database)/documents/enquiries/$(enquiryId)).data.retailerId == request.auth.uid && request.resource.data.senderRole == 'retailer' && isVerifiedRetailer()));
       allow update, delete: if false;
     }
     match /newsletterSubscribers/{subscriberId} { allow read, write: if false; }
