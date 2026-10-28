@@ -10,7 +10,7 @@ import {
   sendPasswordResetEmail, getIdTokenResult
 } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-auth.js';
 import {
-  getFirestore, collection, doc, getDoc, onSnapshot, query, where,
+  getFirestore, collection, doc, getDoc, onSnapshot, query, where, addDoc,
   setDoc, updateDoc, deleteDoc, getDocs, writeBatch, serverTimestamp, deleteField
 } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js';
 import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-functions.js';
@@ -45,6 +45,29 @@ export const createEmailAccount = (email, password) => createUserWithEmailAndPas
 export const resetEmailPassword = email => sendPasswordResetEmail(auth, email.trim());
 export const signOutUser = () => signOut(auth);
 export const getCallable = name => httpsCallable(functions, name);
+export async function createBreedingBooking({ productId, productName, retailerId, requestedDate, customerName, customerPhone, location, note = '' }) {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sign in before requesting a breeding date.');
+  if (!productId || !retailerId || !requestedDate || !customerName?.trim() || !customerPhone?.trim() || !location?.trim()) {
+    throw new Error('Complete your name, phone, location and requested date.');
+  }
+  const chosen = new Date(requestedDate + 'T00:00:00');
+  const today = new Date(); today.setHours(0,0,0,0);
+  if (!Number.isFinite(chosen.getTime()) || chosen < today) throw new Error('Choose today or a future date.');
+  const productSnap = await getDoc(doc(db, 'products', productId));
+  if (!productSnap.exists()) throw new Error('This dog listing is no longer available.');
+  const product = productSnap.data();
+  if (product.status !== 'approved' || product.category !== 'pets-supplies' || product.attributes?.petSection !== 'breeding' || product.retailerId !== retailerId) {
+    throw new Error('This listing is not available for breeding requests.');
+  }
+  return addDoc(collection(db, 'breedingBookings'), {
+    productId, productName: String(productName || product.name || '').slice(0,160),
+    retailerId, customerUid: user.uid, customerName: customerName.trim().slice(0,120),
+    customerEmail: user.email || '', customerPhone: customerPhone.trim().slice(0,40),
+    location: location.trim().slice(0,180), requestedDate, note: String(note).trim().slice(0,1000),
+    status: 'pending', createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+  });
+}
 export const getRoleClaims = async user => {
   const result = await getIdTokenResult(user);
   return result.claims || {};
