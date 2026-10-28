@@ -263,6 +263,7 @@ export function startFirebaseBridge({ onSessionChanged }) {
       ownProducts = unpack(snapshot);
       mergeProducts();
     });
+    listen(query(collection(db, 'breedingBookings'), where('retailerId', '==', uid)), snapshot => hydrateCollection('breedingBookings', unpack(snapshot)));
     listen(query(collection(db, 'retailerOrders'), where('retailerId', '==', uid)), snapshot => {
       ownRetailerOrderDocs = unpack(snapshot);
       const orders = ownRetailerOrderDocs.map(order => ({
@@ -284,6 +285,7 @@ export function startFirebaseBridge({ onSessionChanged }) {
     listen(collection(db, 'retailers'), snapshot => hydrateCollection('retailers', unpack(snapshot)));
     listen(collection(db, 'orders'), snapshot => hydrateCollection('orders', unpack(snapshot)));
     listen(collection(db, 'reports'), snapshot => hydrateCollection('reports', unpack(snapshot)));
+    listen(collection(db, 'breedingBookings'), snapshot => hydrateCollection('breedingBookings', unpack(snapshot)));
   };
 
   const unsubscribeAuth = onAuthStateChanged(auth, async user => {
@@ -296,6 +298,7 @@ export function startFirebaseBridge({ onSessionChanged }) {
       hydrateCollection('retailers', []);
       hydrateCollection('reports', []);
       hydrateCollection('orders', []);
+      hydrateCollection('breedingBookings', []);
       startPublicData();
       onSessionChanged(null);
       return;
