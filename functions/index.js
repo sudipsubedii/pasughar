@@ -1,5 +1,7 @@
 const crypto = require('crypto');
 const {onCall, HttpsError} = require('firebase-functions/v2/https');
+const {onDocumentCreated, onDocumentUpdated} = require('firebase-functions/v2/firestore');
+const {onSchedule} = require('firebase-functions/v2/scheduler');
 const {setGlobalOptions} = require('firebase-functions/v2');
 const {initializeApp} = require('firebase-admin/app');
 const {getFirestore, FieldValue} = require('firebase-admin/firestore');
@@ -346,3 +348,159 @@ exports.updateRetailerOrderStatus = onCall(async request => {
  * getAuth().setCustomUserClaims(userUid, {admin:true});
  * A deployed admin dashboard must rely on that claim plus Firestore Rules/Functions.
  */
+
+
+/**
+ * Private in-site notifications. Writes are made only by trusted server triggers;
+ * notification documents contain minimal copy and never expose another user's record.
+ */
+async function createUserNotification(userId, eventKey, payload) {
+  if (!userId || typeof userId !== 'string') return;
+  const id = hash(userId + ':' + eventKey).slice(0, 48);
+  const ref = db.collection('notifications').doc(id);
+  await db.runTransaction(async tx => {
+    const existing = await tx.get(ref);
+    if (existing.exists) return;
+    tx.create(ref, {
+      userId,
+      title: asText(payload.title, 120) || 'Pashughar update',
+      message: asText(payload.message, 700),
+      kind: asText(payload.kind, 40) || 'update',
+      href: asText(payload.href, 220),
+      read: false,
+      createdAt: FieldValue.serverTimestamp()
+    });
+  });
+}
+
+exports.notifyCustomerNewOrder = onDocumentCreated('orders/{orderId}', async event => {
+  const order = event.data && event.data.data();
+  if (!order || !order.customerId) return;
+  await createUserNotification(order.customerId, 'order-created-' + event.params.orderId, {
+    title: 'Order placed',
+    message: 'Your order ' + event.params.orderId.slice(-8).toUpperCase() + ' was placed. Current status: ' + (order.status || 'Pending') + '.',
+    kind: 'order',
+    href: '#orders'
+  });
+});
+
+exports.notifyCustomerOrderStatus = onDocumentUpdated('orders/{orderId}', async event => {
+  const before = event.data && event.data.before.data();
+  const after = event.data && event.data.after.data();
+  if (!before || !after || !after.customerId || before.status === after.status) return;
+  await createUserNotification(after.customerId, 'order-status-' + event.id, {
+    title: 'Order status updated',
+    message: 'Order ' + event.params.orderId.slice(-8).toUpperCase() + ' is now ' + asText(after.status, 60) + '.',
+    kind: 'order',
+    href: '#orders'
+  });
+});
+
+exports.notifyWishlistProductChanges = onDocumentUpdated('products/{productId}', async event => {
+  const before = event.data && event.data.before.data();
+  const after = event.data && event.data.after.data();
+  if (!before || !after || after.status !== 'approved') return;
+  const notices = [];
+  if (Number(after.price) > 0 && Number(before.price) > Number(after.price)) {
+    notices.push({key:'price-drop', title:'A saved item is cheaper', message:asText(after.name,120) + ' now costs Rs. ' + Number(after.price).toLocaleString('en-IN') + ' (previously Rs. ' + Number(before.price).toLocaleString('en-IN') + ').', kind:'price-drop'});
+  }
+  if (Number(before.stock) <= 0 && Number(after.stock) > 0) {
+    notices.push({key:'restocked', title:'A saved item is back in stock', message:asText(after.name,120) + ' is available again.', kind:'back-in-stock'});
+  }
+  if (!notices.length) return;
+  const saved = await db.collection('wishlists').where('productIds', 'array-contains', event.params.productId).get();
+  await Promise.all(saved.docs.flatMap(item => notices.map(n => createUserNotification(item.id, n.key + '-' + event.id, {
+    title:n.title, message:n.message, kind:n.kind, href:'#wishlist'
+  }))));
+});
+
+exports.notifyCustomerEnquiryReply = onDocumentUpdated('enquiries/{enquiryId}', async event => {
+  const before = event.data && event.data.before.data();
+  const after = event.data && event.data.after.data();
+  if (!before || !after || !after.customerUid) return;
+  if (String(before.reply || '') === String(after.reply || '') || !String(after.reply || '').trim()) return;
+  await createUserNotification(after.customerUid, 'enquiry-reply-' + event.id, {
+    title:'Seller replied to your enquiry',
+    message:'The seller replied about ' + asText(after.productName || 'your listing enquiry', 140) + '.',
+    kind:'enquiry',
+    href:'#enquiries'
+  });
+});
+
+exports.notifyEnquiryChatParticipant = onDocumentCreated('enquiries/{enquiryId}/messages/{messageId}', async event => {
+  const message = event.data && event.data.data();
+  if (!message) return;
+  const enquirySnap = await db.collection('enquiries').doc(event.params.enquiryId).get();
+  if (!enquirySnap.exists) return;
+  const enquiry = enquirySnap.data();
+  const recipient = message.senderUid === enquiry.customerUid ? enquiry.retailerId : enquiry.customerUid;
+  if (!recipient || recipient === message.senderUid) return;
+  await createUserNotification(recipient, 'enquiry-message-' + event.id, {
+    title:'New message about a listing',
+    message:'A new message was sent about ' + asText(enquiry.productName || 'a listing', 140) + '.',
+    kind:'chat',
+    href:recipient === enquiry.customerUid ? '#enquiries' : '#seller'
+  });
+});
+
+exports.notifyVetAppointmentCreated = onDocumentCreated('vetAppointments/{appointmentId}', async event => {
+  const appointment = event.data && event.data.data();
+  if (!appointment) return;
+  await createUserNotification(appointment.vetId, 'vet-request-' + event.id, {
+    title:'New veterinary appointment request',
+    message:asText(appointment.customerName || 'A customer', 100) + ' requested ' + asText(appointment.date, 20) + ' at ' + asText(appointment.time, 10) + '.',
+    kind:'vet-appointment',
+    href:'#seller'
+  });
+});
+
+exports.notifyVetAppointmentStatus = onDocumentUpdated('vetAppointments/{appointmentId}', async event => {
+  const before = event.data && event.data.before.data();
+  const after = event.data && event.data.after.data();
+  if (!before || !after || before.status === after.status) return;
+  if (after.customerUid) await createUserNotification(after.customerUid, 'vet-status-customer-' + event.id, {
+    title:'Veterinary appointment updated',
+    message:asText(after.vetName || 'Your veterinary clinic', 120) + ': appointment ' + asText(after.status, 30) + ' for ' + asText(after.date, 20) + ' at ' + asText(after.time, 10) + '.',
+    kind:'vet-appointment',
+    href:'#appointments'
+  });
+  if (before.status !== 'cancelled' && after.status === 'cancelled' && after.vetId) await createUserNotification(after.vetId, 'vet-cancel-vet-' + event.id, {
+    title:'Veterinary appointment cancelled',
+    message:asText(after.customerName || 'A customer', 100) + ' cancelled the appointment for ' + asText(after.date, 20) + ' at ' + asText(after.time, 10) + '.',
+    kind:'vet-appointment',
+    href:'#seller'
+  });
+});
+
+/**
+ * Scheduled reminder notices are in-app reminders. Two reminder windows are supported
+ * (roughly 24 hours and 1 hour before an appointment); notification IDs are idempotent.
+ */
+exports.sendVetAppointmentReminders = onSchedule('every 15 minutes', async () => {
+  const now = Date.now();
+  const appointments = await db.collection('vetAppointments').where('status', '==', 'confirmed').limit(500).get();
+  for (const appointmentDoc of appointments.docs) {
+    const appointment = appointmentDoc.data();
+    const start = new Date(appointment.startAt || (appointment.date + 'T' + appointment.time + ':00')).getTime();
+    if (!Number.isFinite(start) || start <= now) continue;
+    const remaining = start - now;
+    const reminder = remaining >= (23.75 * 60 * 60 * 1000) && remaining <= (24.25 * 60 * 60 * 1000) ? '24h'
+      : remaining >= (45 * 60 * 1000) && remaining <= (75 * 60 * 1000) ? '1h' : '';
+    if (!reminder) continue;
+    let claimed = false;
+    await db.runTransaction(async tx => {
+      const fresh = await tx.get(appointmentDoc.ref);
+      if (!fresh.exists || fresh.data().status !== 'confirmed') return;
+      const sent = fresh.data().remindersSent || [];
+      if (sent.includes(reminder)) return;
+      tx.update(appointmentDoc.ref, {remindersSent:[...sent, reminder], updatedAt:FieldValue.serverTimestamp()});
+      claimed = true;
+    });
+    if (claimed) await createUserNotification(appointment.customerUid, 'vet-reminder-' + appointmentDoc.id + '-' + reminder, {
+      title:reminder === '24h' ? 'Veterinary appointment tomorrow' : 'Veterinary appointment in about one hour',
+      message:asText(appointment.vetName || 'Veterinary clinic', 120) + ' · ' + asText(appointment.date, 20) + ' at ' + asText(appointment.time, 10) + '.',
+      kind:'vet-reminder',
+      href:'#appointments'
+    });
+  }
+});
