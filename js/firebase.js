@@ -590,10 +590,11 @@ export function startFirebaseBridge({ onSessionChanged }) {
     const userRole = profileData.role === 'retailer' || retailerExists ? 'retailer' : 'customer';
     const session = {
       uid: user.uid,
-      name: user.displayName || user.email?.split('@')[0] || user.phoneNumber || 'Customer',
+      name: user.displayName || profileData.displayName || user.email?.split('@')[0] || user.phoneNumber || 'Customer',
       email: user.email || '',
-      photoURL: user.photoURL || '',
+      photoURL: user.photoURL || profileData.photoURL || '',
       phoneNumber: user.phoneNumber || '',
+      profilePhone: profileData.phone || '',
       emailVerified: Boolean(user.emailVerified),
       role: isAdmin ? 'admin' : userRole,
       firebase: true
