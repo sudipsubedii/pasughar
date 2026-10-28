@@ -656,7 +656,7 @@ exports.getVetUnavailableSlots = onCall(async request => {
   requireAuth(request);
   const vetId = cleanId(request.data && request.data.vetId, 160);
   const date = asText(request.data && request.data.date, 10);
-  if (!vetId || !/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) {
+  if (!vetId || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     throw new HttpsError('invalid-argument', 'Choose a veterinary clinic and a valid date.');
   }
   const [year, month, day] = date.split('-').map(Number);
