@@ -34,7 +34,7 @@ function downloadOrdersCsv(){
   const values=[order.id,created,order.customerName,order.customerEmail,shipping.phone||order.phone,shipping.address||order.shippingAddress,shipping.city,items,order.subtotal,order.deliveryFee,order.total??order.subtotal,order.paymentMethod,order.paymentStatus,order.status];
   lines.push(values.map(csvValue).join(','));
  }
- const blob=new Blob(['\\uFEFF'+lines.join('\\r\\n')],{type:'text/csv;charset=utf-8;'});
+ const blob=new Blob(['\uFEFF'+lines.join('\r\n')],{type:'text/csv;charset=utf-8;'});
  const url=URL.createObjectURL(blob),anchor=document.createElement('a');
  anchor.href=url;anchor.download='pashughar-orders-'+new Date().toISOString().slice(0,10)+'.csv';
  document.body.appendChild(anchor);anchor.click();anchor.remove();URL.revokeObjectURL(url);
