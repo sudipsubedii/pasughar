@@ -334,3 +334,9 @@ body[data-theme="dark"] .vet-profile-summary{background:var(--canvas)}
 .review-empty h3{font-size:16px}
 .review-empty p{font-size:11px}
 @media(max-width:800px){.reviews-heading{align-items:flex-start;flex-direction:column}.review-average{justify-items:start}.review-layout{grid-template-columns:1fr}.product-share-actions{gap:6px}.product-share-actions button{padding:9px 10px}}
+
+/* Explicit visual fallback for unavailable listing images */
+.product-image-wrap.image-missing::after{content:'Image unavailable';position:absolute;inset:0;display:grid;place-items:center;padding:16px;background:linear-gradient(135deg,#eef2e8,#dfe7db);color:#607363;font-size:12px;font-weight:750;letter-spacing:.02em;text-align:center;pointer-events:none}
+.detail-image.image-missing{display:grid;place-items:center;background:linear-gradient(135deg,#eef2e8,#dfe7db)}
+.detail-image.image-missing::after{content:'Product image unavailable';position:absolute;inset:0;display:grid;place-items:center;color:#607363;font-size:13px;font-weight:750;text-align:center;padding:20px;pointer-events:none}
+body[data-theme="dark"] .product-image-wrap.image-missing::after,body[data-theme="dark"] .detail-image.image-missing{background:linear-gradient(135deg,#28392d,#1d2a22);color:#c7d8c9}
