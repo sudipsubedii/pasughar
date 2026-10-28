@@ -1,5 +1,5 @@
 import {store, CATEGORIES, money, categoryName, normalizeCategoryId, slugId, safe, hydrateCollection} from './store.js';
-import {isFirebaseConfigured, signInGoogle, signInEmail, createEmailAccount, resetEmailPassword, signOutUser, startFirebaseBridge, getCallable, moderateRetailerDirect, moderateProductDirect, removeProductDirect} from './firebase.js';
+import {isFirebaseConfigured, signInGoogle, signInEmail, createEmailAccount, resetEmailPassword, signOutUser, startFirebaseBridge, getCallable, moderateRetailerDirect, moderateProductDirect, removeProductDirect, createBreedingBooking} from './firebase.js';
 
 store.init();
 // In Firebase mode, never briefly display fictional sample catalogue/dashboard data while
@@ -289,7 +289,7 @@ function renderPetSection(params) {
   }[type];
   const items = activeProducts().filter(p => p.category === 'pets-supplies' && ((p.attributes && p.attributes.petSection) || 'pets') === type);
   const cards = items.map(p => type === 'breeding'
-    ? '<article class="product-card pet-breeding-card"><div class="product-image-wrap"><a href="'+publicProductUrl(p)+'"><img class="product-image" src="'+safe(p.image||'')+'" alt="'+safe(p.name)+'" loading="lazy"></a><span class="product-badge">'+safe(p.location||'Location not set')+'</span></div><div class="product-content"><div class="product-store">'+safe(p.retailer||'Verified retailer')+'</div><a href="'+publicProductUrl(p)+'"><h3 class="product-title">'+safe(p.name)+'</h3></a><div class="product-meta"><span>'+safe(p.location||'Nepal')+'</span><span>'+safe((p.attributes && p.attributes.breed)||'Breed details on listing')+'</span></div><p class="small-muted">Fee / arrangement: '+money(p.price)+'</p><a class="button button-primary button-wide" href="'+publicProductUrl(p)+'">View dog & details →</a></div></article>'
+    ? '<article class="product-card pet-breeding-card"><div class="product-image-wrap"><a href="'+publicProductUrl(p)+'"><img class="product-image" src="'+safe(p.image||'')+'" alt="'+safe(p.name)+'" loading="lazy"></a><span class="product-badge">'+safe(p.location||'Location not set')+'</span></div><div class="product-content"><div class="product-store">'+safe(p.retailer||'Verified retailer')+'</div><a href="'+publicProductUrl(p)+'"><h3 class="product-title">'+safe(p.name)+'</h3></a><div class="product-meta"><span>'+safe(p.location||'Nepal')+'</span><span>'+safe((p.attributes && p.attributes.breed)||'Breed details on listing')+'</span></div><p class="small-muted">Fee / arrangement: '+money(p.price)+'</p><div class="pet-breeding-actions"><a class="button button-secondary button-wide" href="'+publicProductUrl(p)+'">View dog</a><button class="button button-primary button-wide" type="button" data-action="book-breeding" data-id="'+safe(p.id)+'">Request a date</button></div></div></article>'
     : productCard(p)).join('');
   const filters = [['pets','Pets'],['accessories','Pet accessories'],['breeding','Pet breeding']].map(x => '<a class="pet-filter-chip '+(x[0]===type?'active':'')+'" href="#pet-section?type='+x[0]+'">'+x[1]+'</a>').join('');
   app.innerHTML = '<div class="page-wrap pet-marketplace"><div class="container"><div class="pet-page-top"><a class="button button-secondary" href="#pets">← Back to pet sections</a><div class="eyebrow">'+info.eyebrow+'</div><h1>'+info.title+'</h1><p>'+info.desc+'</p></div><div class="pet-filter-row">'+filters+'</div>'+(items.length?'<div class="product-grid">'+cards+'</div>':'<div class="pet-empty"><div class="pet-empty-icon">'+(type==='breeding'?'🐕':type==='accessories'?'🦴':'🐾')+'</div><h2>No listings yet</h2><p>'+info.empty+'</p><a class="button button-primary" href="#seller">Sell on Pashughar →</a></div>')+'</div></div>';
@@ -356,6 +356,18 @@ function submitProduct(form){
     return;
   }
   closeModal();renderSellerDashboard();showToast(existing?'Listing updated and published.':'Product published to the marketplace.');
+}
+
+
+function openBreedingBookingForm(productId) {
+  const product = getProduct(productId);
+  if (!product || product.status !== 'approved' || product.category !== 'pets-supplies' || product.attributes?.petSection !== 'breeding') return showToast('This breeding listing is not available.','error');
+  if (!isFirebaseConfigured()) return showToast('Breeding booking requests require Firebase sign-in and the live Firestore rules.','warn');
+  const user = session();
+  if (!user) return showToast('Sign in with your customer account before requesting a breeding date.','warn');
+  const today = new Date(); const minDate = [today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-');
+  modalContent.innerHTML = '<div class="modal-inner"><div class="modal-head"><div><div class="eyebrow">Pet breeding</div><h2>Request a breeding date</h2><p>'+safe(product.name)+' · '+safe(product.location||'Location not specified')+'</p></div><button class="modal-close" data-action="close-modal" aria-label="Close">×</button></div><form id="breeding-booking-form" data-product-id="'+safe(product.id)+'" data-retailer-id="'+safe(product.retailerId)+'" data-product-name="'+safe(product.name)+'"><div class="field"><label for="booking-name">Your name *</label><input id="booking-name" name="customerName" required maxlength="120" value="'+safe(user.name||'')+'"></div><div class="field"><label for="booking-phone">Phone number *</label><input id="booking-phone" name="customerPhone" required maxlength="40" inputmode="tel" placeholder="98XXXXXXXX"></div><div class="field"><label for="booking-date">Requested date *</label><input id="booking-date" name="requestedDate" type="date" min="'+minDate+'" required></div><div class="field"><label for="booking-location">Your location *</label><input id="booking-location" name="location" required maxlength="180" placeholder="City / district"></div><div class="field"><label for="booking-note">Note to the dog owner</label><textarea id="booking-note" name="note" maxlength="1000" placeholder="Share breed questions or preferred time."></textarea></div><div class="notice notice-info">This sends a request, not a confirmed booking. The dog owner must review and accept the date.</div><div class="modal-actions"><button type="button" class="button button-secondary" data-action="close-modal">Cancel</button><button type="submit" class="button button-primary">Send booking request →</button></div></form></div>';
+  if (typeof modal.showModal === 'function') modal.showModal(); else modal.setAttribute('open','');
 }
 
 function openReportForm(productId){
@@ -456,6 +468,7 @@ document.addEventListener('click',e=>{
   else if(action==='detail-add'){const qty=Math.max(1,Math.floor(Number(document.getElementById('detail-qty')?.value||1)));addToCart(id,qty);}
   else if(action==='set-product-image'){activeProductImageIndex=Math.max(0,Number(actionEl.dataset.index)||0);renderProduct(id);}
   else if(action==='report-product'){openReportForm(id);}
+  else if(action==='book-breeding'){openBreedingBookingForm(id);}
   else if(action==='edit-shop-registration'){const user=session();if(user)renderSellerSetup(user);}
   else if(action==='qty-minus'){const el=document.getElementById('detail-qty');if(el)el.value=Math.max(1,Number(el.value)-1);}
   else if(action==='qty-plus'){const el=document.getElementById('detail-qty');if(el)el.value=Math.min(Number(el.max),Number(el.value)+1);}
@@ -583,6 +596,15 @@ document.addEventListener('submit',e=>{
     } else {renderSellerDashboard();showToast(status==='approved'?'Shop profile saved.':'Shop submitted for admin verification.');}
   } else if(form.id==='product-form'){
     e.preventDefault();submitProduct(form);
+  } else if(form.id==='breeding-booking-form'){
+    e.preventDefault();
+    const fd=new FormData(form);
+    const submit=form.querySelector('button[type="submit"]'); if(submit) submit.disabled=true;
+    createBreedingBooking({
+      productId:form.dataset.productId, productName:form.dataset.productName, retailerId:form.dataset.retailerId,
+      requestedDate:String(fd.get('requestedDate')||''), customerName:String(fd.get('customerName')||''),
+      customerPhone:String(fd.get('customerPhone')||''), location:String(fd.get('location')||''), note:String(fd.get('note')||'')
+    }).then(()=>{closeModal();showToast('Breeding date request sent to the retailer.');}).catch(error=>{if(submit)submit.disabled=false;showToast(error.message||firebaseErrorMessage(error),'error');});
   } else if(form.id==='report-form'){
     e.preventDefault();submitReport(form);
   } else if(form.id==='checkout-form'){
