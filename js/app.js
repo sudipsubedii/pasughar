@@ -458,7 +458,7 @@ function addToCart(id, qty=1){
   const cart=store.cart();const existing=cart.find(i=>i.id===id);const requested=(existing?Number(existing.qty):0)+Number(qty);
   if(requested>Number(product.stock))return showToast(`Only ${product.stock} ${product.unit||'unit'}${Number(product.stock)===1?'':'s'} available.`,'warn');
   if(existing)existing.qty=requested;else cart.push({id,qty:Number(qty)});
-  store.saveCart(cart);updateCartCount();showToast(`${product.name} added to basket.`);
+  store.saveCart(cart);updateCartCount();showToast(`Added to basket: ${product.name}.`);
 }
 function updateCartQty(id, delta){const cart=store.cart();const item=cart.find(i=>i.id===id);const p=getProduct(id);if(!item||!p)return;if(delta>0&&item.qty>=Number(p.stock))return showToast('No more stock is available.','warn');item.qty+=delta;if(item.qty<=0){store.saveCart(cart.filter(i=>i.id!==id));}else{store.saveCart(cart);}renderCart();}
 function toggleWishlist(id){const list=store.wishlist();if(list.includes(id)){store.saveWishlist(list.filter(i=>i!==id));showToast('Removed from your wishlist.');}else{store.saveWishlist([...list,id]);showToast('Saved to wishlist.');}render();}
@@ -663,7 +663,7 @@ document.addEventListener('click',e=>{
   }
   else if(action==='confirm-phone-otp'){
     const code=document.getElementById('auth-otp')?.value||'';authRole=document.getElementById('auth-role')?.value||authRole;
-    confirmPhoneOtp(code,authRole).then(credential=>{firebaseSession={...(firebaseSession||{}),uid:credential.user.uid,name:credential.user.displayName||credential.user.phoneNumber,phoneNumber:credential.user.phoneNumber,email:credential.user.email||'',emailVerified:credential.user.emailVerified,role:authRole,firebase:true};showToast('Phone verified. Signed in successfully.');navigate(authRole==='retailer'?'#seller':'#shop');}).catch(error=>showToast(firebaseErrorMessage(error),'error'));
+    confirmPhoneOtp(code,authRole).then(credential=>{firebaseSession={...(firebaseSession||{}),uid:credential.user.uid,name:credential.user.displayName||credential.user.phoneNumber,phoneNumber:credential.user.phoneNumber,email:credential.user.email||'',emailVerified:credential.user.emailVerified,role:credential.pashugharRole||authRole,firebase:true};showToast('Phone verified. Signed in successfully.');navigate((credential.pashugharRole||authRole)==='retailer'?'#seller':'#shop');}).catch(error=>showToast(firebaseErrorMessage(error),'error'));
   }
   else if(action==='auth-password-reset'){
     const email=document.getElementById('auth-email')?.value?.trim();if(!email)return showToast('Enter your email address first.','warn');
