@@ -532,3 +532,12 @@ exports.sendAppointmentReminders = onSchedule('every 30 minutes', async () => {
     });
   }
 });
+exports.notifyOrderCreated = require('firebase-functions/v2/firestore').onDocumentCreated('orders/{orderId}', async event => {
+  const order=event.data && event.data.data();
+  if(!order || !order.customerId)return;
+  await db.collection('users').doc(order.customerId).collection('notifications').add({
+    type:'order',title:'Order placed successfully',
+    body:'Your order '+event.params.orderId+' has been received. Current status: '+asText(order.status||'Pending',60)+'.',
+    relatedId:event.params.orderId,read:false,createdAt:FieldValue.serverTimestamp()
+  });
+});
