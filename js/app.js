@@ -31,28 +31,34 @@ let activeReportFilter = 'open';
 let firebaseSession = null;
 
 const getRoute = () => {
-  const hashRoute = location.hash.replace(/^#/, '');
-  if (hashRoute) {
-    const [path, queryString = ''] = hashRoute.split('?');
-    return {path: path || 'home', params: new URLSearchParams(queryString)};
+  if (location.hash) {
+    const [hashPath, queryString = ''] = location.hash.slice(1).split('?');
+    return {path: hashPath || 'home', params: new URLSearchParams(queryString)};
   }
-  const path = decodeURIComponent(location.pathname.replace(/\\/+$/, '').split('/').pop() || '').toLowerCase();
+  const segments = location.pathname.split('/').filter(Boolean).map(part => {
+    try { return decodeURIComponent(part); } catch { return part; }
+  });
+  const last = String(segments[segments.length - 1] || '').toLowerCase();
   const aliases = {
-    '': ['home',''], 'index.html': ['home',''],
-    'live': ['shop','category=livestock'], 'live-animals': ['shop','category=livestock'],
-    'livestock': ['shop','category=livestock'], 'meat': ['shop','category=meat'],
-    'meat-poultry': ['shop','category=meat'], 'supplies': ['pets',''], 'pets': ['pets',''],
-    'pet-supplies': ['pets',''], 'vet-care': ['shop','category=animal-care'],
-    'animal-care': ['shop','category=animal-care'], 'animal-products': ['shop','category=animal-products'],
-    'products': ['shop',''], 'marketplace': ['shop',''], 'cart': ['cart',''],
-    'wishlist': ['wishlist',''], 'saved': ['wishlist',''], 'seller': ['seller',''],
-    'login': ['seller',''], 'admin': ['admin',''], 'about': ['about',''],
-    'learn': ['learn',''], 'contact': ['contact',''], 'privacy': ['privacy',''], 'terms': ['terms','']
+    'index.html': ['home',''], 'live': ['shop','category=livestock'],
+    'live-animals': ['shop','category=livestock'], 'livestock': ['shop','category=livestock'],
+    'meat': ['shop','category=meat'], 'meat-poultry': ['shop','category=meat'],
+    'supplies': ['pets',''], 'pets': ['pets',''], 'pet-supplies': ['pets',''],
+    'vet-care': ['shop','category=animal-care'], 'animal-care': ['shop','category=animal-care'],
+    'animal-products': ['shop','category=animal-products'], 'products': ['shop',''],
+    'marketplace': ['shop',''], 'cart': ['cart',''], 'wishlist': ['wishlist',''],
+    'saved': ['wishlist',''], 'seller': ['seller',''], 'login': ['seller',''],
+    'admin': ['admin',''], 'about': ['about',''], 'learn': ['learn',''],
+    'contact': ['contact',''], 'privacy': ['privacy',''], 'terms': ['terms','']
   };
-  if (path.startsWith('product/')) return {path, params: new URLSearchParams()};
-  const mapped = aliases[path];
-  if (!mapped) return {path: path || 'home', params: new URLSearchParams()};
-  return {path: mapped[0], params: new URLSearchParams(mapped[1])};
+  if (segments.length >= 2 && String(segments[segments.length - 2]).toLowerCase() === 'product') {
+    return {path: 'product/' + encodeURIComponent(segments[segments.length - 1]), params: new URLSearchParams(location.search.slice(1))};
+  }
+  const mapped = aliases[last];
+  if (!mapped) return {path: last || 'home', params: new URLSearchParams(location.search.slice(1))};
+  const params = new URLSearchParams(mapped[1]);
+  new URLSearchParams(location.search.slice(1)).forEach((value,key) => params.set(key,value));
+  return {path: mapped[0], params};
 };
 const allProducts = () => store.products();
 const activeProducts = () => allProducts().filter(p => p.status === 'approved' && (() => { const r = store.retailers().find(x => x.ownerId === p.retailerId || x.id === p.retailerId); return !r || r.status === 'approved'; })());
@@ -387,7 +393,7 @@ function navigate(hash, options = {}) {
   const target = String(hash || '#home').startsWith('#') ? String(hash || '#home') : '#'+String(hash);
   if (target === location.hash && location.hash) return;
   history.replaceState({... (history.state || {}), pashugharRoute: location.hash || location.pathname, pashugharScrollY: window.scrollY}, '', location.href);
-  history.pushState({pashugharRoute:target,pashugharScrollY:0}, '', target);
+  history.pushState({pashugharRoute:target,pashugharScrollY:0,pashugharInternal:true}, '', target);
   const nav=document.getElementById('main-nav');
   nav?.classList.remove('open');
   document.getElementById('menu-toggle')?.setAttribute('aria-expanded','false');
@@ -459,7 +465,7 @@ function openBreedingBookingForm(productId) {
   if (!user) return showToast('Sign in with your customer account before requesting a breeding date.','warn');
   const today = new Date(); const minDate = [today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-');
   modalContent.innerHTML = '<div class="modal-inner"><div class="modal-head"><div><div class="eyebrow">Pet breeding</div><h2>Request a breeding date</h2><p>'+safe(product.name)+' · '+safe(product.location||'Location not specified')+'</p></div><button class="modal-close" data-action="close-modal" aria-label="Close">×</button></div><form id="breeding-booking-form" data-product-id="'+safe(product.id)+'" data-retailer-id="'+safe(product.retailerId)+'" data-product-name="'+safe(product.name)+'"><div class="field"><label for="booking-name">Your name *</label><input id="booking-name" name="customerName" required maxlength="120" value="'+safe(user.name||'')+'"></div><div class="field"><label for="booking-phone">Phone number *</label><input id="booking-phone" name="customerPhone" required maxlength="40" inputmode="tel" placeholder="98XXXXXXXX"></div><div class="field"><label for="booking-date">Requested date *</label><input id="booking-date" name="requestedDate" type="date" min="'+minDate+'" required></div><div class="field"><label for="booking-location">Your location *</label><input id="booking-location" name="location" required maxlength="180" placeholder="City / district"></div><div class="field"><label for="booking-note">Note to the dog owner</label><textarea id="booking-note" name="note" maxlength="1000" placeholder="Share breed questions or preferred time."></textarea></div><div class="notice notice-info">This sends a request, not a confirmed booking. The dog owner must review and accept the date.</div><div class="modal-actions"><button type="button" class="button button-secondary" data-action="close-modal">Cancel</button><button type="submit" class="button button-primary">Send booking request →</button></div></form></div>';
-  if (typeof modal.showModal === 'function') modal.showModal(); else modal.setAttribute('open','');
+  showModalWithHistory();
 }
 
 function openReportForm(productId){
@@ -550,7 +556,7 @@ document.addEventListener('click',e=>{
   if(!actionEl)return;
   const action=actionEl.dataset.action;const id=actionEl.dataset.id;
   if(action==='route-back'){
-    if(history.state?.pashugharRoute && history.length>1) history.back();
+    if(history.state?.pashugharInternal && history.length>1) history.back();
     else navigate(fallbackBackRoute(getRoute().path));
   }
   else if(action==='toggle-theme'){applyTheme(document.body.dataset.theme==='dark'?'light':'dark',true);}
