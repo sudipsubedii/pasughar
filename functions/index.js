@@ -127,6 +127,7 @@ exports.createOrder = onCall(async (request) => {
       notes: asText(shipping.notes, 800),
       items: resolvedItems,
       productIds: resolvedItems.map(item => item.productId),
+      deliveredProductIds: [],
       subtotal: total,
       total,
       currency: 'NPR',
@@ -321,12 +322,20 @@ exports.updateRetailerOrderStatus = onCall(async request => {
   await ref.update({status, statusUpdatedBy: auth.uid, updatedAt: FieldValue.serverTimestamp()});
   if (order.orderId) {
     const siblings = await db.collection('retailerOrders').where('orderId', '==', order.orderId).get();
-    const states = siblings.docs.map(doc => doc.id === retailerOrderId ? status : doc.data().status);
+    const statusById = new Map(siblings.docs.map(doc => [doc.id, doc.id === retailerOrderId ? status : doc.data().status]));
+    const states = [...statusById.values()];
     let masterStatus = 'Pending';
     if (states.length && states.every(value => value === 'Delivered')) masterStatus = 'Delivered';
-    else if (states.length && states.every(value => value === 'Cancelled')) masterStatus = 'Cancelled';
+    else if (states.length && states.every(value => value === 'Cancelled' || value === 'Rejected')) masterStatus = 'Cancelled';
     else if (states.some(value => value !== 'Pending')) masterStatus = 'Partially fulfilled';
-    await db.collection('orders').doc(order.orderId).update({status: masterStatus, updatedAt: FieldValue.serverTimestamp()});
+    const deliveredProductIds = [...new Set(siblings.docs
+      .filter(doc => statusById.get(doc.id) === 'Delivered')
+      .flatMap(doc => (doc.data().items || []).map(item => asText(item.productId,160)).filter(Boolean)))];
+    await db.collection('orders').doc(order.orderId).update({
+      status: masterStatus,
+      deliveredProductIds,
+      updatedAt: FieldValue.serverTimestamp()
+    });
   }
   await db.collection('auditLogs').add({actorId: auth.uid, action:'retailer_order_status_updated', targetId: retailerOrderId, status, createdAt: FieldValue.serverTimestamp()});
   return {retailerOrderId, status};
