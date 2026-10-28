@@ -6,7 +6,8 @@ const STORAGE_KEYS = {
   wishlist: 'pashughar.wishlist.v1',
   retailers: 'pashughar.retailers.v1',
   reports: 'pashughar.reports.v1',
-  breedingBookings: 'pashughar.breedingBookings.v1'
+  breedingBookings: 'pashughar.breedingBookings.v1',
+  enquiries: 'pashughar.enquiries.v1'
 };
 
 let persistenceAdapter = null;
@@ -68,6 +69,8 @@ export const store = {
   saveReports: (items) => writeJson(STORAGE_KEYS.reports, items),
   breedingBookings: () => readJson(STORAGE_KEYS.breedingBookings, []),
   saveBreedingBookings: (items) => writeJson(STORAGE_KEYS.breedingBookings, items),
+  enquiries: () => readJson(STORAGE_KEYS.enquiries, []),
+  saveEnquiries: (items) => { const previous=readJson(STORAGE_KEYS.enquiries,[]); const next=Array.isArray(items)?items:[]; writeJson(STORAGE_KEYS.enquiries,next); return persistCloud('enquiries',previous,next); },
   resetDemo: () => { Object.values(STORAGE_KEYS).forEach(k => localStorage.removeItem(k)); initializeStore(); }
 };
 // Each marketplace category has its own palette, inspired by the user's visual references.
@@ -112,7 +115,7 @@ export const safe = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&'
 
 // Cloud snapshots update the local cache without triggering write-back loops.
 export function hydrateCollection(name, items) {
-  const key = ({ products: STORAGE_KEYS.products, retailers: STORAGE_KEYS.retailers, orders: STORAGE_KEYS.orders, reports: STORAGE_KEYS.reports, breedingBookings: STORAGE_KEYS.breedingBookings })[name];
+  const key = ({ products: STORAGE_KEYS.products, retailers: STORAGE_KEYS.retailers, orders: STORAGE_KEYS.orders, reports: STORAGE_KEYS.reports, breedingBookings: STORAGE_KEYS.breedingBookings, enquiries: STORAGE_KEYS.enquiries })[name];
   if (!key) throw new Error(`Unknown cache collection: ${name}`);
   writeJson(key, Array.isArray(items) ? items : []);
   try { window.dispatchEvent(new CustomEvent('pashughar:cloud-updated', { detail: { name, count: Array.isArray(items) ? items.length : 0 } })); } catch {}
