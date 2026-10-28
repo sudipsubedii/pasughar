@@ -301,7 +301,7 @@ function updateCartCount(){
   const cartEl=document.getElementById('cart-count'); if(cartEl)cartEl.textContent=cartCount();
   const savedEl=document.getElementById('wishlist-count'); if(savedEl)savedEl.textContent=store.wishlist().length;
 }
-function scrollTop(){window.scrollTo({top:0,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
+function scrollTop(){window.scrollTo({top:0,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});}
 function renderPetsHub() {
   delete app.dataset.sectionTheme;
   const cards = [
