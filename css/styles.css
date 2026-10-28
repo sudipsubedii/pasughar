@@ -160,3 +160,8 @@ body[data-theme="dark"] .verification-card,body[data-theme="dark"] .report-card{
 .pet-breeding-card .product-meta { flex-wrap:wrap; }
 @media (max-width: 850px) { .pet-section-grid { grid-template-columns:1fr 1fr; } .pet-section-image { height:190px; } }
 @media (max-width: 580px) { .pet-section-grid { grid-template-columns:1fr; } .pet-section-image { height:220px; } .pet-section-copy { padding:20px; } }
+
+/* Header login link */
+.login-link { white-space:nowrap; border:1px solid var(--line); border-radius:999px; padding:10px 15px; font-weight:750; color:var(--ink); text-decoration:none; }
+.login-link:hover { border-color:var(--accent); color:var(--accent); }
+@media(max-width:600px){ .login-link { padding:8px 10px; } }
