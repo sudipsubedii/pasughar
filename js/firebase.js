@@ -45,6 +45,12 @@ export const createEmailAccount = (email, password) => createUserWithEmailAndPas
 export const resetEmailPassword = email => sendPasswordResetEmail(auth, email.trim());
 export const signOutUser = () => signOut(auth);
 export const getCallable = name => httpsCallable(functions, name);
+export async function updateBreedingBookingStatus(bookingId, status) {
+  if (!['accepted','declined','completed','cancelled'].includes(status)) throw new Error('Invalid booking status.');
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sign in to manage this request.');
+  return updateDoc(doc(db, 'breedingBookings', bookingId), { status, updatedAt: serverTimestamp() });
+}
 export async function createBreedingBooking({ productId, productName, retailerId, requestedDate, customerName, customerPhone, location, note = '' }) {
   const user = auth.currentUser;
   if (!user) throw new Error('Sign in before requesting a breeding date.');
