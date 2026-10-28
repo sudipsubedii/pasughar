@@ -257,3 +257,45 @@ body[data-theme="dark"] .cloud-error-banner{background:#3c2723;color:#ffdbcf;bor
 .vet-profile-summary p{margin:7px 0;font-size:13px}
 body[data-theme="dark"] .vet-profile-summary{background:var(--canvas)}
 @media(max-width:640px){.category-attributes-grid{grid-template-columns:1fr}.public-store-hero{grid-template-columns:1fr}.store-avatar{width:64px;height:64px}.earnings-statement>div{align-items:flex-start}}
+
+/* Search autocomplete, advanced filters and product card improvements */
+.search-form{position:relative}
+.search-suggestions{position:absolute;top:calc(100% + 8px);left:0;right:0;z-index:1400;max-height:min(420px,70vh);overflow:auto;padding:6px;border:1px solid var(--line);border-radius:14px;background:var(--paper);box-shadow:0 18px 50px rgba(20,40,27,.17);color:var(--ink)}
+.search-suggestions[hidden]{display:none}
+.search-suggestion-item{display:flex;align-items:center;gap:10px;width:100%;padding:11px 10px;border:0;border-radius:9px;background:transparent;color:inherit;text-align:left}
+.search-suggestion-item:hover,.search-suggestion-item:focus-visible{background:var(--canvas)}
+.search-suggestion-icon{width:32px;height:32px;display:grid;place-items:center;border-radius:9px;background:var(--green-3);color:var(--green);flex-shrink:0}
+.search-suggestion-copy{display:grid;gap:3px;min-width:0;flex:1}
+.search-suggestion-copy strong{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.search-suggestion-copy small,.search-suggestion-type{font-size:10px;color:var(--muted)}
+.search-suggestion-empty{padding:15px;font-size:12px;color:var(--muted);line-height:1.6}
+.search-trends{padding:22px 0 5px;background:var(--paper)}
+.search-trends-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:15px;margin-bottom:13px}
+.search-trends-heading h2{font-size:20px;margin:7px 0 0}
+.search-trend-chips{display:flex;gap:9px;flex-wrap:wrap}
+.search-trend-chip{border:1px solid var(--line);border-radius:999px;padding:9px 13px;background:var(--paper);color:var(--ink);font-size:11px;font-weight:700}
+.search-trend-chip:hover{background:var(--green-3);border-color:#b9cdbb}
+.shop-results-column{min-width:0}
+.price-filter-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.price-filter-grid .filter-option{display:grid;gap:7px}
+.price-filter-grid input,.filter-option select{width:100%;min-width:0;border:1px solid var(--line);border-radius:8px;padding:9px;background:var(--paper);color:var(--ink);font-size:11px}
+.filter-panel .filter-group>.filter-option{align-items:flex-start;flex-direction:column;margin:12px 0}
+.listing-pagination{display:flex;align-items:center;justify-content:center;gap:18px;padding:24px 0}
+.listing-pagination span{font-size:12px;color:var(--muted);font-weight:700}
+.listing-pagination button:disabled{opacity:.4;cursor:not-allowed}
+.search-no-results{margin-top:15px}
+.no-results-actions{display:flex;justify-content:center;gap:10px;flex-wrap:wrap}
+.verified-badge{display:inline-flex;align-items:center;gap:3px;padding:3px 6px;border-radius:5px;background:#e6f2e7;color:#28643c;font-size:9px;font-weight:800;white-space:nowrap}
+.card-rating{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:800;color:#996b12;margin:-2px 0 10px}
+.card-rating small{font-size:10px;color:var(--muted);font-weight:500}
+.product-card .product-image-wrap{aspect-ratio:4/3}
+.product-card .product-image{width:100%;height:100%;object-fit:cover;display:block}
+.product-image.image-failed{visibility:hidden}
+.add-button{width:auto;min-width:74px;height:33px;padding:0 10px;font-size:11px;font-weight:800;white-space:nowrap}
+.wishlist-button.is-saved{color:#bd3348}
+.detail-image{position:relative;aspect-ratio:1/1;min-width:0}
+.detail-image>img{display:block;width:100%;height:100%;object-fit:contain;cursor:zoom-in}
+.product-detail-grid{align-items:start}
+.detail-gallery{flex-wrap:wrap}
+.detail-gallery .gallery-thumb{aspect-ratio:1/1}
+@media(max-width:800px){.search-suggestions{max-height:55vh}.search-trends-heading{align-items:flex-start;flex-direction:column}.listing-pagination{gap:10px}.listing-pagination .button{padding:10px 12px}.shop-results-column .product-grid{align-items:stretch}.product-card .product-image-wrap{aspect-ratio:1/1}}
