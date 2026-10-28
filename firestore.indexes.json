@@ -27,6 +27,20 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "messages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "message",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "senderRole",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []
