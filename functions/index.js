@@ -446,12 +446,18 @@ exports.notifyEnquiryChatParticipant = onDocumentCreated('enquiries/{enquiryId}/
 exports.notifyVetAppointmentCreated = onDocumentCreated('vetAppointments/{appointmentId}', async event => {
   const appointment = event.data && event.data.data();
   if (!appointment) return;
-  await createUserNotification(appointment.vetId, 'vet-request-' + event.id, {
-    title:'New veterinary appointment request',
-    message:asText(appointment.customerName || 'A customer', 100) + ' requested ' + asText(appointment.date, 20) + ' at ' + asText(appointment.time, 10) + '.',
-    kind:'vet-appointment',
-    href:'#seller'
-  });
+  await Promise.all([
+    createUserNotification(appointment.vetId, 'vet-request-' + event.id, {
+      title:'New veterinary appointment request',
+      message:asText(appointment.customerName || 'A customer', 100) + ' requested ' + asText(appointment.date, 20) + ' at ' + asText(appointment.time, 10) + '.',
+      kind:'vet-appointment', href:'#seller'
+    }),
+    createUserNotification(appointment.customerUid, 'vet-request-confirmation-' + event.id, {
+      title:'Veterinary request submitted',
+      message:'Your request with ' + asText(appointment.vetName || 'the clinic', 120) + ' for ' + asText(appointment.date, 20) + ' at ' + asText(appointment.time, 10) + ' is pending confirmation.',
+      kind:'vet-appointment', href:'#appointments'
+    })
+  ]);
 });
 
 exports.notifyVetAppointmentStatus = onDocumentUpdated('vetAppointments/{appointmentId}', async event => {
@@ -541,10 +547,10 @@ exports.createVetAppointment = onCall(async request => {
   const appointmentRef = db.collection('vetAppointments').doc();
   const slotRef = db.collection('vetAppointmentSlots').doc(input.slotKey);
   await db.runTransaction(async tx => {
-    const [slotSnap, vetSnap] = await Promise.all([
-      tx.get(slotRef), tx.get(db.collection('publicStores').doc(input.vetId))
+    const [slotSnap, vetSnap, retailerSnap] = await Promise.all([
+      tx.get(slotRef), tx.get(db.collection('publicStores').doc(input.vetId)), tx.get(db.collection('retailers').doc(input.vetId))
     ]);
-    if (!vetSnap.exists || vetSnap.data().isVet !== true) throw new HttpsError('failed-precondition', 'This veterinary clinic is not currently accepting appointments.');
+    if (!vetSnap.exists || vetSnap.data().isVet !== true || !retailerSnap.exists || retailerSnap.data().status !== 'approved') throw new HttpsError('failed-precondition', 'This veterinary clinic is not currently accepting appointments.');
     if (slotSnap.exists) throw new HttpsError('already-exists', 'That time slot is already requested. Choose another.');
     const vet = vetSnap.data();
     const customerName = asText(input.auth.token.name || input.auth.token.email || input.auth.token.phone_number || 'Customer', 120);
