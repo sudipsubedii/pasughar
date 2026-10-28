@@ -319,6 +319,39 @@ function renderSellerEnquiries(enquiries) {
   return '<div class="panel-card"><div class="panel-heading"><div><h2>Enquiry inbox</h2><p>Replies are visible to the customer who sent the enquiry.</p></div><span class="status-pill">'+rows.filter(x=>x.status==='open').length+' open</span></div>'+rows.map(e=>'<article class="enquiry-card"><div class="enquiry-card-head"><div><strong>'+safe(e.productName||'Product enquiry')+'</strong><div class="small-muted">'+safe(e.customerName||'Customer')+' · '+safe(e.customerPhone||e.customerEmail||'')+'</div></div><span class="status-pill '+(e.status==='replied'?'':'status-pending')+'">'+safe(e.status||'open')+'</span></div><p>'+safe(e.message)+'</p>'+(e.reply?'<div class="enquiry-reply"><strong>Your reply</strong><p>'+safe(e.reply)+'</p></div>':'')+'<form class="enquiry-reply-form" data-enquiry-id="'+safe(e.id)+'"><div class="field"><label for="reply-'+safe(e.id)+'">'+(e.reply?'Update reply':'Reply to customer')+'</label><textarea id="reply-'+safe(e.id)+'" name="reply" required minlength="2" maxlength="1500" placeholder="Write a helpful reply">'+safe(e.reply||'')+'</textarea></div><button class="button button-secondary button-small" type="submit">Send reply</button></form></article>').join('')+'</div>';
 }
 
+
+function openEnquiryForm(productId) {
+  const product=getProduct(productId);
+  if(!product || product.status!=='approved') return showToast('This listing is no longer available.','error');
+  const user=session();
+  if(!user){showToast('Sign in to message the retailer.','warn');navigate('#login');return;}
+  if(!isVerifiedContact({emailVerified:user.emailVerified,phoneNumber:user.phoneNumber})){showToast('Verify your email or phone before sending an enquiry.','warn');navigate('#account');return;}
+  if(!isFirebaseConfigured()) return showToast('Customer enquiries require the live Firebase project.','warn');
+  modalContent.innerHTML='<div class="modal-inner"><div class="modal-head"><div><div class="eyebrow">Contact retailer</div><h2>Ask about this listing</h2><p>'+safe(product.name)+' · '+safe(product.location||'Nepal')+'</p></div><button class="modal-close" data-action="close-modal" aria-label="Close">×</button></div><form id="product-enquiry-form" data-product-id="'+safe(product.id)+'" data-product-name="'+safe(product.name)+'" data-retailer-id="'+safe(product.retailerId)+'"><div class="field"><label for="enquiry-name">Your name</label><input id="enquiry-name" name="customerName" maxlength="120" value="'+safe(user.name||'')+'" required></div><div class="field"><label for="enquiry-phone">Phone</label><input id="enquiry-phone" name="customerPhone" maxlength="40" inputmode="tel" value="'+safe(user.phoneNumber||'')+'" placeholder="98XXXXXXXX"></div><div class="field"><label for="enquiry-message">Your question</label><textarea id="enquiry-message" name="message" minlength="5" maxlength="1500" required placeholder="Ask about availability, delivery, vaccination or product details."></textarea></div><div class="notice notice-info">Your enquiry is visible only to you, the assigned retailer and Pashughar administrators.</div><div class="modal-actions"><button type="button" class="button button-secondary" data-action="close-modal">Cancel</button><button type="submit" class="button button-primary">Send enquiry →</button></div></form></div>';
+  showModalWithHistory();
+}
+function renderPublicStore(storeId) {
+  app.innerHTML='<div class="page-wrap"><div class="container"><div class="initial-loading">Loading store profile…</div></div></div>';
+  getPublicStoreProfile(storeId).then(function(profile){
+    if(!profile){
+      app.innerHTML='<div class="page-wrap"><div class="container">'+emptyState('⌕','Store profile not available','This retailer has not published a public store profile yet.','#shop','Back to marketplace')+'</div></div>';
+      return;
+    }
+    const products=activeProducts().filter(function(p){return String(p.retailerId)===String(storeId);});
+    const vet=profile.isVet===true;
+    const facts='<span>⌖ '+safe(profile.location||'Nepal')+'</span>'+
+      (profile.openingHours?'<span>◷ '+safe(profile.openingHours)+'</span>':'')+
+      (profile.publicPhone?'<a href="tel:'+safe(profile.publicPhone)+'">☎ '+safe(profile.publicPhone)+'</a>':'')+
+      (profile.publicEmail?'<a href="mailto:'+safe(profile.publicEmail)+'">✉ '+safe(profile.publicEmail)+'</a>':'')+
+      (profile.website?'<a href="'+safe(profile.website)+'" target="_blank" rel="noopener noreferrer">Website ↗</a>':'');
+    const vetHtml=vet?'<div class="vet-profile-summary"><strong>Veterinary services</strong><p>Specialties: '+safe((profile.vetSpecialties||[]).join(', ')||'Contact for details')+'</p><p>Availability: '+safe(profile.vetAvailability||'Contact the clinic')+'</p><p>Consultation fee: '+(Number(profile.consultationFee)>0?money(profile.consultationFee):'Contact for fee')+'</p></div>':'';
+    app.innerHTML='<div class="page-wrap public-store-page"><div class="container"><div class="route-context"><a class="button button-secondary" href="#shop">← Back to marketplace</a><nav class="route-breadcrumbs" aria-label="Breadcrumb"><a href="#home">Home</a> / <a href="#shop">Marketplace</a> / <strong>'+safe(profile.storeName||'Local store')+'</strong></nav></div><section class="public-store-hero"><div class="store-avatar">'+safe(String(profile.storeName||'P').slice(0,1).toUpperCase())+'</div><div><div class="eyebrow">'+(vet?'Veterinary services & retailer':'Pashughar verified retailer')+'</div><h1>'+safe(profile.storeName||'Local retailer')+'</h1><p>'+safe(profile.description||'Local supplier on Pashughar.')+'</p><div class="public-store-facts">'+facts+'</div>'+vetHtml+'</div></section><section class="products-section"><div class="section-head"><div><div class="eyebrow">Retailer catalogue</div><h2>Available listings</h2><p>'+products.length+' approved listing(s) from this store.</p></div></div>'+(products.length?'<div class="product-grid">'+products.map(productCard).join('')+'</div>':'<p class="small-muted">No products currently published.</p>')+'</section></div></div>';
+  }).catch(function(error){
+    app.innerHTML='<div class="page-wrap"><div class="container">'+emptyState('!','Could not load store','Please check your connection and retry.','#shop','Back to marketplace')+'<button class="button button-secondary" data-action="retry-store" data-id="'+safe(storeId)+'">Retry</button></div></div>';
+    showToast(firebaseErrorMessage(error),'error');
+  });
+}
+
 function renderBreedingBookings(bookings, isAdmin) {
   const rows = bookings.slice().sort((a,b)=>String(b.requestedDate||'').localeCompare(String(a.requestedDate||''))).map(b=>'<tr><td><strong>'+safe(b.productName||'Dog listing')+'</strong><div class="small-muted">'+safe(b.location||'')+'</div></td><td>'+safe(b.customerName||'Customer')+'<div class="small-muted">'+safe(b.customerPhone||'')+'</div></td><td><strong>'+safe(b.requestedDate||'—')+'</strong><div class="small-muted">'+safe(b.customerEmail||'')+'</div></td><td><span class="status-pill '+statusClass(b.status)+'">'+safe(statusLabel(b.status))+'</span></td><td><div class="inline-actions">'+(b.status==='pending'?'<button class="tiny-action" data-action="booking-status" data-id="'+safe(b.id)+'" data-status="accepted">Accept</button><button class="tiny-action danger" data-action="booking-status" data-id="'+safe(b.id)+'" data-status="declined">Decline</button>':'')+(b.status==='accepted'?'<button class="tiny-action" data-action="booking-status" data-id="'+safe(b.id)+'" data-status="completed">Complete</button>':'')+'</div></td></tr>').join('');
   return '<div class="panel-card"><div class="panel-heading"><div><h2>Pet breeding date requests</h2><p>'+(isAdmin?'Marketplace-wide requests.':'Requests for dogs listed by your shop.')+' A request is not a confirmed booking until accepted by the owner.</p></div><span class="status-pill">'+bookings.length+' total</span></div>'+(bookings.length?'<div class="table-scroll"><table><thead><tr><th>Dog / location</th><th>Customer</th><th>Requested date</th><th>Status</th><th>Action</th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<p class="small-muted">No breeding date requests yet.</p>')+'</div>';
@@ -496,6 +529,7 @@ function render() {
   else if(path==='pets')renderPetsHub();
   else if(path==='pet-section')renderPetSection(params);
   else if(path.startsWith('product/'))renderProduct(decodeURIComponent(path.slice(8)));
+  else if(path.startsWith('store/'))renderPublicStore(decodeURIComponent(path.slice(6)));
   else if(path==='cart')renderCart();
   else if(path==='account')renderAccount();
   else if(path==='seller') { if(session()?.role==='retailer')renderSellerDashboard(); else renderAuthPage('retailer'); }
@@ -767,6 +801,8 @@ document.addEventListener('click',e=>{
   else if(action==='detail-add'){const qty=Math.max(1,Math.floor(Number(document.getElementById('detail-qty')?.value||1)));addToCart(id,qty);}
   else if(action==='set-product-image'){activeProductImageIndex=Math.max(0,Number(actionEl.dataset.index)||0);renderProduct(id);}
   else if(action==='report-product'){openReportForm(id);}
+  else if(action==='enquire-product'){openEnquiryForm(id);}
+  else if(action==='retry-store'){renderPublicStore(id);}
   else if(action==='book-breeding'){openBreedingBookingForm(id);}
   else if(action==='edit-shop-registration'){const user=session();if(user)renderSellerSetup(user);}
   else if(action==='qty-minus'){const el=document.getElementById('detail-qty');if(el)el.value=Math.max(1,Number(el.value)-1);}
