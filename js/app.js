@@ -1005,6 +1005,15 @@ document.addEventListener('click',e=>{
   else if(action==='set-product-image'){activeProductImageIndex=Math.max(0,Number(actionEl.dataset.index)||0);renderProduct(id);}
   else if(action==='zoom-product-image'){const p=getProduct(id);if(!p)return;const image=(Array.isArray(p.images)&&p.images.length?p.images:[p.image]).filter(Boolean)[activeProductImageIndex]||p.image;modalContent.innerHTML='<div class="modal-inner image-zoom-modal"><div class="modal-head"><h2>'+safe(p.name)+'</h2><button class="modal-close" data-action="close-modal" aria-label="Close">×</button></div><img src="'+safe(image)+'" width="1200" height="1200" alt="'+safe(p.name)+' enlarged image" loading="eager"></div>';showModalWithHistory();}
   else if(action==='report-product'){openReportForm(id);}
+  else if(action==='share-product'){
+    const p=getProduct(id);if(!p)return showToast('This listing is no longer available.','warn');
+    const url=location.origin+location.pathname+'#product/'+encodeURIComponent(p.id);
+    const text=encodeURIComponent(p.name+' · '+money(p.price)+' · '+url);
+    if(actionEl.dataset.channel==='whatsapp'){window.open('https://wa.me/?text='+text,'_blank','noopener,noreferrer');}
+    else if(actionEl.dataset.channel==='viber'){window.open('viber://forward?text='+text,'_blank','noopener,noreferrer');}
+    else if(navigator.clipboard?.writeText){navigator.clipboard.writeText(url).then(()=>showToast('Product link copied.')).catch(()=>showToast('Could not copy automatically. Copy the URL from the address bar.','warn'));}
+    else {const temp=document.createElement('textarea');temp.value=url;temp.style.position='fixed';temp.style.opacity='0';document.body.append(temp);temp.select();const ok=document.execCommand('copy');temp.remove();showToast(ok?'Product link copied.':'Copy the URL from the address bar.',ok?'':'warn');}
+  }
   else if(action==='enquire-product'){openEnquiryForm(id);}
   else if(action==='retry-store'){renderPublicStore(id);}
   else if(action==='book-breeding'){openBreedingBookingForm(id);}
@@ -1127,6 +1136,11 @@ document.addEventListener('submit',e=>{
   const form=e.target;
   if(form.id==='global-search'){
     e.preventDefault();const q=String(document.getElementById('search-input').value||'').trim();activeShopQuery=q;activeShopCategory='';activeShopPage=1;recordSearch(q);document.getElementById('search-suggestions')?.setAttribute('hidden','');navigate(`#shop?q=${encodeURIComponent(q)}`);
+  } else if(form.id==='product-review-form'){
+    e.preventDefault();const fd=new FormData(form);const button=form.querySelector('button[type="submit"]');if(button){button.disabled=true;button.textContent='Submitting review…';}
+    submitProductReview({productId:form.dataset.productId,orderId:String(fd.get('orderId')||''),rating:Number(fd.get('rating')),body:String(fd.get('body')||'')})
+      .then(()=>{showToast('Review published. Thank you for sharing verified purchase feedback.');loadProductReviews(form.dataset.productId,true);})
+      .catch(error=>{if(button){button.disabled=false;button.textContent='Submit review';}showToast(firebaseErrorMessage(error),'error');});
   } else if(form.id==='product-enquiry-form'){
     e.preventDefault();const fd=new FormData(form);const submit=form.querySelector('button[type="submit"]');if(submit)submit.disabled=true;
     createProductEnquiry({productId:form.dataset.productId,productName:form.dataset.productName,retailerId:form.dataset.retailerId,customerName:String(fd.get('customerName')||''),customerPhone:String(fd.get('customerPhone')||''),message:String(fd.get('message')||'')})
