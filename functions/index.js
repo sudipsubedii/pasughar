@@ -354,7 +354,9 @@ exports.updateRetailerOrderStatus = onCall(async request => {
  */
 
 function validNepalMobile(value) {
-  return /^(?:\+977)?9[6-8]\d{8}$/.test(String(value||'').replace(/[\s().-]/g,'').replace(/^0/,''));
+  const digits = String(value || '').replace(/\D/g, '');
+  const local = digits.startsWith('977') ? digits.slice(3) : digits.startsWith('0') ? digits.slice(1) : digits;
+  return /^9[6-8]\d{8}$/.test(local);
 }
 function validDate(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value||''))) return false;
