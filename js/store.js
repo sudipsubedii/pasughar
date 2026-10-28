@@ -27,13 +27,16 @@ export const hydrateSiteSettings = value => {
   try { window.dispatchEvent(new CustomEvent('pashughar:site-settings', {detail:next})); } catch {}
 };
 export const hydrateCategories = records => {
-  if (!Array.isArray(records) || !records.length) return;
-  const normalized = records.filter(x => x && typeof x.id === 'string' && x.id).map(x => {
-    const previous = CATEGORIES.find(c => c.id === x.id) || {};
-    return {...previous, ...x, palette: {...(previous.palette || {}), ...(x.palette || {})}};
-  });
-  if (!normalized.length) return;
-  CATEGORIES.splice(0, CATEGORIES.length, ...normalized);
+  const base = typeof BUILT_IN_CATEGORIES !== 'undefined' ? BUILT_IN_CATEGORIES : CATEGORIES;
+  const merged = new Map(base.map(category => [category.id, {...category, palette:{...(category.palette||{})}}]));
+  if (Array.isArray(records)) {
+    for (const record of records) {
+      if (!record || typeof record.id !== 'string' || !record.id) continue;
+      const previous = merged.get(record.id) || {};
+      merged.set(record.id, {...previous, ...record, palette:{...(previous.palette||{}), ...(record.palette||{})}});
+    }
+  }
+  CATEGORIES.splice(0, CATEGORIES.length, ...merged.values());
   try { window.dispatchEvent(new CustomEvent('pashughar:categories', {detail:{count:CATEGORIES.length}})); } catch {}
 };
 export const configurePersistenceAdapter = adapter => { persistenceAdapter = adapter || null; };
@@ -135,6 +138,7 @@ export const CATEGORIES = [
     palette:{accent:'#769382',deep:'#304E40',wash:'#EAF0EA',soft:'#F3EFE3',warm:'#C0C3B9',contrast:'#536C5D'}
   }
 ];
+const BUILT_IN_CATEGORIES = CATEGORIES.map(category => ({...category, palette:{...(category.palette||{})}}));
 export const normalizeCategoryId = id => ({pets:'pets-supplies','pet-supplies':'pets-supplies'}[String(id||'')] || String(id||''));
 export const money = (amount) => new Intl.NumberFormat('en-NP',{style:'currency',currency:'NPR',maximumFractionDigits:0}).format(Number(amount)||0);
 export const categoryName = id => CATEGORIES.find(c=>c.id===normalizeCategoryId(id))?.name || 'Other';
