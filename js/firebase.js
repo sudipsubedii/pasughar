@@ -186,7 +186,7 @@ export async function saveCustomerProfile({displayName, phone}) {
   const name = String(displayName || '').trim();
   const contactPhone = String(phone || '').trim();
   if (!name || name.length > 100) throw new Error('Enter a name of 1 to 100 characters.');
-  if (contactPhone && !/^(?:\\+977[- ]?)?(?:0)?9[6-8]\\d{8}$/.test(contactPhone.replace(/[\\s().-]/g,''))) throw new Error('Enter a valid Nepali mobile number, for example 98XXXXXXXX.');
+  if (contactPhone && !/^(?:\+977[- ]?)?(?:0)?9[6-8]\d{8}$/.test(contactPhone.replace(/[\s().-]/g,''))) throw new Error('Enter a valid Nepali mobile number, for example 98XXXXXXXX.');
   await updateDoc(doc(db,'users',user.uid), {
     displayName:name, phone:contactPhone, updatedAt:serverTimestamp()
   });
@@ -256,7 +256,7 @@ async function writePublicStore(retailer) {
     openingHours:String(retailer.openingHours||'').slice(0,700),
     vetSpecialties:Array.isArray(retailer.vetSpecialties)?retailer.vetSpecialties.slice(0,20):[],
     vetAvailability:String(retailer.vetAvailability||'').slice(0,700),
-    vetAppointmentSlots:Array.isArray(retailer.vetAppointmentSlots)?retailer.vetAppointmentSlots.map(x=>String(x).trim()).filter(x=>/^([01]\\d|2[0-3]):[0-5]\\d$/.test(x)).slice(0,24):[],
+    vetAppointmentSlots:Array.isArray(retailer.vetAppointmentSlots)?retailer.vetAppointmentSlots.map(x=>String(x).trim()).filter(x=>/^([01]\d|2[0-3]):[0-5]\d$/.test(x)).slice(0,24):[],
     consultationFee:Math.max(0,Number(retailer.consultationFee)||0),
     isVet:Boolean(retailer.isVet),
     updatedAt:serverTimestamp()
