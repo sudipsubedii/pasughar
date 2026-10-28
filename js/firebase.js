@@ -467,7 +467,6 @@ export function startFirebaseBridge({ onSessionChanged }) {
     listen(query(collection(db, 'breedingBookings'), where('retailerId', '==', uid)), snapshot => hydrateCollection('breedingBookings', unpack(snapshot)));
     listen(query(collection(db, 'enquiries'), where('retailerId', '==', uid)), snapshot => hydrateCollection('enquiries', unpack(snapshot)));
     listen(query(collection(db, 'vetAppointments'), where('vetId', '==', uid)), snapshot => hydrateCollection('vetAppointments', unpack(snapshot)));
-    listen(doc(db, 'wishlists', uid), snapshot => store.saveWishlist(snapshot.exists() ? (snapshot.data().productIds || []) : []));
     listen(query(collection(db, 'retailerOrders'), where('retailerId', '==', uid)), snapshot => {
       ownRetailerOrderDocs = unpack(snapshot);
       const orders = ownRetailerOrderDocs.map(order => ({
@@ -544,6 +543,7 @@ export function startFirebaseBridge({ onSessionChanged }) {
       return;
     }
     startPublicData();
+    listen(doc(db, 'wishlists', user.uid), snapshot => store.saveWishlist(snapshot.exists() ? (snapshot.data().productIds || []) : []));
     if (session.role === 'retailer') startRetailerData(user.uid);
   });
   return () => { stopDataListeners(); unsubscribeAuth(); };
