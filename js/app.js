@@ -31,10 +31,28 @@ let activeReportFilter = 'open';
 let firebaseSession = null;
 
 const getRoute = () => {
-  const raw = location.hash.replace(/^#/, '') || 'home';
-  const [path, queryString = ''] = raw.split('?');
-  const params = new URLSearchParams(queryString);
-  return {path: path || 'home', params};
+  const hashRoute = location.hash.replace(/^#/, '');
+  if (hashRoute) {
+    const [path, queryString = ''] = hashRoute.split('?');
+    return {path: path || 'home', params: new URLSearchParams(queryString)};
+  }
+  const path = decodeURIComponent(location.pathname.replace(/\\/+$/, '').split('/').pop() || '').toLowerCase();
+  const aliases = {
+    '': ['home',''], 'index.html': ['home',''],
+    'live': ['shop','category=livestock'], 'live-animals': ['shop','category=livestock'],
+    'livestock': ['shop','category=livestock'], 'meat': ['shop','category=meat'],
+    'meat-poultry': ['shop','category=meat'], 'supplies': ['pets',''], 'pets': ['pets',''],
+    'pet-supplies': ['pets',''], 'vet-care': ['shop','category=animal-care'],
+    'animal-care': ['shop','category=animal-care'], 'animal-products': ['shop','category=animal-products'],
+    'products': ['shop',''], 'marketplace': ['shop',''], 'cart': ['cart',''],
+    'wishlist': ['wishlist',''], 'saved': ['wishlist',''], 'seller': ['seller',''],
+    'login': ['seller',''], 'admin': ['admin',''], 'about': ['about',''],
+    'learn': ['learn',''], 'contact': ['contact',''], 'privacy': ['privacy',''], 'terms': ['terms','']
+  };
+  if (path.startsWith('product/')) return {path, params: new URLSearchParams()};
+  const mapped = aliases[path];
+  if (!mapped) return {path: path || 'home', params: new URLSearchParams()};
+  return {path: mapped[0], params: new URLSearchParams(mapped[1])};
 };
 const allProducts = () => store.products();
 const activeProducts = () => allProducts().filter(p => p.status === 'approved' && (() => { const r = store.retailers().find(x => x.ownerId === p.retailerId || x.id === p.retailerId); return !r || r.status === 'approved'; })());
@@ -164,7 +182,7 @@ function renderShop(params = new URLSearchParams()) {
   if(activeShopSort==='name') items.sort((a,b)=>a.name.localeCompare(b.name));
   const checked = (id) => activeShopCategory===id?'checked':'';
   const categoryBanner = sectionCategory ? `<section class="category-shop-banner" style="--section-accent:${sectionCategory.palette.accent};--section-deep:${sectionCategory.palette.deep};--section-wash:${sectionCategory.palette.wash};--section-soft:${sectionCategory.palette.soft};--section-warm:${sectionCategory.palette.warm}"><div class="category-shop-copy"><div class="eyebrow">${safe(sectionCategory.kicker)}</div><h1>${safe(sectionCategory.name)}</h1><p>${safe(sectionCategory.description)}. Explore approved listings from local retailers.</p><a href="#shop" class="category-back-link">View all categories <span aria-hidden="true">→</span></a></div><div class="category-shop-image"><img src="${safe(sectionCategory.image)}" alt="" loading="lazy"></div></section>` : `<div class="page-title-row"><div><div class="eyebrow">The Pashughar marketplace</div><h1>Explore all products</h1><p>Find products and livestock offered by local retailers.</p></div></div>`;
-  app.innerHTML = `<div class="page-wrap"><div class="container"><div class="breadcrumbs"><a href="#home">Home</a> / Marketplace</div><div class="shop-heading-row">${categoryBanner}<button class="button button-secondary mobile-filter-button" data-action="toggle-filters">☷ Filters</button></div>${demoNotice()}<div class="shop-layout"><aside class="filter-panel ${activeShopFiltersVisible?'filters-open':''}" id="filter-panel"><h3>Filter products</h3><div class="filter-group"><h4>Categories</h4><div class="filter-options"><label class="filter-option"><input type="radio" name="category-filter" value="" ${!activeShopCategory?'checked':''}> All categories</label>${CATEGORIES.map(c=>`<label class="filter-option"><input type="radio" name="category-filter" value="${c.id}" ${checked(c.id)}> ${c.name}</label>`).join('')}</div></div><div class="filter-group"><h4>Availability</h4><label class="filter-option"><input type="checkbox" id="stock-filter" ${activeShopStockOnly?'checked':''}> In stock only</label></div><div class="filter-group"><button class="button button-secondary button-wide" data-action="reset-filters">Clear filters</button></div></aside><div><div class="shop-toolbar"><span class="result-count">Showing <strong>${items.length}</strong> product${items.length===1?'':'s'}</span><select id="sort-select" aria-label="Sort products"><option value="featured" ${activeShopSort==='featured'?'selected':''}>Featured</option><option value="newest" ${activeShopSort==='newest'?'selected':''}>Newest first</option><option value="price-asc" ${activeShopSort==='price-asc'?'selected':''}>Price: low to high</option><option value="price-desc" ${activeShopSort==='price-desc'?'selected':''}>Price: high to low</option><option value="name" ${activeShopSort==='name'?'selected':''}>Name A–Z</option></select></div><div class="product-grid">${items.map(productCard).join('')}</div>${items.length===0?emptyState('⌕','No matching products','Try another search or clear filters to explore more listings.','#shop','Clear and browse all'):''}</div></div></div></div>`;
+  app.innerHTML = `<div class="page-wrap"><div class="container"><div class="shop-heading-row">${categoryBanner}<button class="button button-secondary mobile-filter-button" data-action="toggle-filters">☷ Filters</button></div>${demoNotice()}<div class="shop-layout"><aside class="filter-panel ${activeShopFiltersVisible?'filters-open':''}" id="filter-panel"><h3>Filter products</h3><div class="filter-group"><h4>Categories</h4><div class="filter-options"><label class="filter-option"><input type="radio" name="category-filter" value="" ${!activeShopCategory?'checked':''}> All categories</label>${CATEGORIES.map(c=>`<label class="filter-option"><input type="radio" name="category-filter" value="${c.id}" ${checked(c.id)}> ${c.name}</label>`).join('')}</div></div><div class="filter-group"><h4>Availability</h4><label class="filter-option"><input type="checkbox" id="stock-filter" ${activeShopStockOnly?'checked':''}> In stock only</label></div><div class="filter-group"><button class="button button-secondary button-wide" data-action="reset-filters">Clear filters</button></div></aside><div><div class="shop-toolbar"><span class="result-count">Showing <strong>${items.length}</strong> product${items.length===1?'':'s'}</span><select id="sort-select" aria-label="Sort products"><option value="featured" ${activeShopSort==='featured'?'selected':''}>Featured</option><option value="newest" ${activeShopSort==='newest'?'selected':''}>Newest first</option><option value="price-asc" ${activeShopSort==='price-asc'?'selected':''}>Price: low to high</option><option value="price-desc" ${activeShopSort==='price-desc'?'selected':''}>Price: high to low</option><option value="name" ${activeShopSort==='name'?'selected':''}>Name A–Z</option></select></div><div class="product-grid">${items.map(productCard).join('')}</div>${items.length===0?emptyState('⌕','No matching products','Try another search or clear filters to explore more listings.','#shop','Clear and browse all'):''}</div></div></div></div>`;
 }
 
 function renderProduct(id) {
@@ -176,7 +194,7 @@ function renderProduct(id) {
   const images = (Array.isArray(p.images) && p.images.length ? p.images : [p.image]).filter(Boolean).slice(0,5);
   if(activeProductImageIndex >= images.length) activeProductImageIndex = 0;
   const mainImage = images[activeProductImageIndex] || p.image || '';
-  app.innerHTML = `<div class="page-wrap"><div class="container"><div class="breadcrumbs"><a href="#home">Home</a> / <a href="#shop">Marketplace</a> / ${safe(categoryName(p.category))} / ${safe(p.name)}</div><div class="product-detail-grid"><div class="detail-image"><img src="${safe(mainImage)}" alt="${safe(p.name)}" onerror="this.style.display='none'">${images.length>1?`<div class="detail-gallery">${images.map((src,i)=>`<button type="button" class="gallery-thumb ${i===activeProductImageIndex?'active':''}" data-action="set-product-image" data-id="${safe(p.id)}" data-index="${i}" aria-label="View product image ${i+1}"><img src="${safe(src)}" alt=""></button>`).join('')}</div>`:''}</div><div class="detail-copy"><div class="detail-category">${safe(categoryName(p.category))} · ${safe(p.condition||'Listed product')}</div><h1>${safe(p.name)}</h1><div class="product-store"><span class="store-dot"></span>${safe(p.retailer||'Local retailer')} · ${safe(p.location||'Nepal')}</div><div class="detail-price">${money(p.price)} <span>/ ${safe(p.unit||'item')}</span></div><span class="status-pill ${isAvailable(p)?'':'status-soldout'}"><span class="status-dot"></span>${isAvailable(p)?`In stock · ${Number(p.stock)} ${safe(p.unit||'item')}${Number(p.stock)===1?'':'s'}`:'Sold out'}</span><p class="detail-description">${safe(p.description)}</p>${attrs.length?`<div class="detail-meta">${attrs.map(([k,v])=>`<div class="meta-box"><span>${safe(k.replace(/([A-Z])/g,' $1').replace(/^./,s=>s.toUpperCase()))}</span><strong>${safe(v)}</strong></div>`).join('')}</div>`:''}<div class="quantity-row"><label for="detail-qty">Quantity</label><div class="quantity-control"><button data-action="qty-minus" aria-label="Decrease quantity">−</button><input id="detail-qty" type="number" value="1" min="1" max="${Math.max(1,Number(p.stock))}" aria-label="Quantity"><button data-action="qty-plus" aria-label="Increase quantity" ${isAvailable(p)?'':'disabled'}>+</button></div><span class="small-muted">per ${safe(p.unit||'item')}</span></div><div class="detail-actions"><button class="button button-primary" data-action="detail-add" data-id="${safe(p.id)}" ${isAvailable(p)?'':'disabled'}>${isAvailable(p)?'Add to cart':'Sold out'}</button><button class="button button-secondary" data-action="wishlist" data-id="${safe(p.id)}">${store.wishlist().includes(p.id)?'♥ Saved':'♡ Save item'}</button></div><button class="report-link" data-action="report-product" data-id="${safe(p.id)}" type="button"><span aria-hidden="true">⚑</span> Report this listing</button><div class="notice notice-info">Marketplace note: verify seller details, product specifications and any relevant animal health or food-safety documentation before completing a purchase.</div></div></div>${related.length?`<section class="products-section">${sectionHeading('Keep exploring','Similar listings','','View all')}<div class="product-grid">${related.map(productCard).join('')}</div></section>`:''}</div></div>`;
+  app.innerHTML = `<div class="page-wrap"><div class="container"><div class="product-detail-grid"><div class="detail-image"><img src="${safe(mainImage)}" alt="${safe(p.name)}" onerror="this.style.display='none'">${images.length>1?`<div class="detail-gallery">${images.map((src,i)=>`<button type="button" class="gallery-thumb ${i===activeProductImageIndex?'active':''}" data-action="set-product-image" data-id="${safe(p.id)}" data-index="${i}" aria-label="View product image ${i+1}"><img src="${safe(src)}" alt=""></button>`).join('')}</div>`:''}</div><div class="detail-copy"><div class="detail-category">${safe(categoryName(p.category))} · ${safe(p.condition||'Listed product')}</div><h1>${safe(p.name)}</h1><div class="product-store"><span class="store-dot"></span>${safe(p.retailer||'Local retailer')} · ${safe(p.location||'Nepal')}</div><div class="detail-price">${money(p.price)} <span>/ ${safe(p.unit||'item')}</span></div><span class="status-pill ${isAvailable(p)?'':'status-soldout'}"><span class="status-dot"></span>${isAvailable(p)?`In stock · ${Number(p.stock)} ${safe(p.unit||'item')}${Number(p.stock)===1?'':'s'}`:'Sold out'}</span><p class="detail-description">${safe(p.description)}</p>${attrs.length?`<div class="detail-meta">${attrs.map(([k,v])=>`<div class="meta-box"><span>${safe(k.replace(/([A-Z])/g,' $1').replace(/^./,s=>s.toUpperCase()))}</span><strong>${safe(v)}</strong></div>`).join('')}</div>`:''}<div class="quantity-row"><label for="detail-qty">Quantity</label><div class="quantity-control"><button data-action="qty-minus" aria-label="Decrease quantity">−</button><input id="detail-qty" type="number" value="1" min="1" max="${Math.max(1,Number(p.stock))}" aria-label="Quantity"><button data-action="qty-plus" aria-label="Increase quantity" ${isAvailable(p)?'':'disabled'}>+</button></div><span class="small-muted">per ${safe(p.unit||'item')}</span></div><div class="detail-actions"><button class="button button-primary" data-action="detail-add" data-id="${safe(p.id)}" ${isAvailable(p)?'':'disabled'}>${isAvailable(p)?'Add to cart':'Sold out'}</button><button class="button button-secondary" data-action="wishlist" data-id="${safe(p.id)}">${store.wishlist().includes(p.id)?'♥ Saved':'♡ Save item'}</button></div><button class="report-link" data-action="report-product" data-id="${safe(p.id)}" type="button"><span aria-hidden="true">⚑</span> Report this listing</button><div class="notice notice-info">Marketplace note: verify seller details, product specifications and any relevant animal health or food-safety documentation before completing a purchase.</div></div></div>${related.length?`<section class="products-section">${sectionHeading('Keep exploring','Similar listings','','View all')}<div class="product-grid">${related.map(productCard).join('')}</div></section>`:''}</div></div>`;
 }
 function cartTotals(cart) {
   const subtotal = cart.reduce((sum, item)=>{const p=getProduct(item.id);return sum+(p?Number(p.price)*Number(item.qty):0)},0);
@@ -265,6 +283,7 @@ function renderWishlist() {
 }
 function renderSimplePage(path) {
   const content={
+    learn:['Learn about buying and selling safely','Compare listings carefully, confirm the seller and location, check stock status, and request appropriate animal-health or food-safety documentation before arranging a purchase. Retailers should provide accurate descriptions, pricing, stock and location details.'],
     about:['About Pashughar','Pashughar is a marketplace concept designed to bring livestock, meat and poultry, pets & supplies, animal products, and animal-care essentials together in one place. Our goal is to make product discovery easier while helping retailers organize listings and stock.'],
     contact:['Contact support','For this prototype, customer support contact information has not yet been configured. Add your business email, telephone number, service hours, and support workflow before launch.'],
     privacy:['Privacy policy','This prototype stores demo session details, sample orders, product listings, and cart data in local browser storage. That is not a production privacy or data-security arrangement. Publish a legally reviewed privacy policy covering account information, orders, seller verification, payments, retention, and user rights before collecting real customer data.'],
@@ -272,8 +291,11 @@ function renderSimplePage(path) {
   }[path]||['Page not found','The requested page is not available. Return to the marketplace and continue browsing.'];
   app.innerHTML=`<div class="simple-page"><div class="container"><article><div class="eyebrow">Pashughar information</div><h1>${content[0]}</h1><p>${content[1]}</p><a class="button button-primary" href="#home">Back to home</a></article></div></div>`;
 }
-function updateCartCount(){const el=document.getElementById('cart-count');if(el)el.textContent=cartCount();}
-function scrollTop(){window.scrollTo({top:0,behavior:'instant'});}
+function updateCartCount(){
+  const cartEl=document.getElementById('cart-count'); if(cartEl)cartEl.textContent=cartCount();
+  const savedEl=document.getElementById('wishlist-count'); if(savedEl)savedEl.textContent=store.wishlist().length;
+}
+function scrollTop(){window.scrollTo({top:0,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
 function renderPetsHub() {
   delete app.dataset.sectionTheme;
   const cards = [
@@ -306,24 +328,72 @@ function renderPetSection(params) {
   const filters = [['pets','Pets'],['accessories','Pet accessories'],['breeding','Pet breeding']].map(x => '<a class="pet-filter-chip '+(x[0]===type?'active':'')+'" href="#pet-section?type='+x[0]+'">'+x[1]+'</a>').join('');
   app.innerHTML = '<div class="page-wrap pet-marketplace"><div class="container"><div class="pet-page-top"><a class="button button-secondary" href="#pets">← Back to pet sections</a><div class="eyebrow">'+info.eyebrow+'</div><h1>'+info.title+'</h1><p>'+info.desc+'</p></div><div class="pet-filter-row">'+filters+'</div>'+(items.length?'<div class="product-grid">'+cards+'</div>':'<div class="pet-empty"><div class="pet-empty-icon">'+(type==='breeding'?'🐕':type==='accessories'?'🦴':'🐾')+'</div><h2>No listings yet</h2><p>'+info.empty+'</p><a class="button button-primary" href="#seller">Sell on Pashughar →</a></div>')+'</div></div>';
 }
+function routeTitle(path, params) {
+  if (path.startsWith('product/')) return getProduct(decodeURIComponent(path.slice(8)))?.name || 'Product details';
+  if (path === 'shop') {
+    const cat = CATEGORIES.find(item => item.id === normalizeCategoryId(params.get('category') || ''));
+    return cat?.name || 'Marketplace';
+  }
+  if (path === 'pet-section') return ({pets:'Pets for sale',accessories:'Pet accessories',breeding:'Pet breeding'})[params.get('type')] || 'Pet section';
+  return ({pets:'Pets & supplies',cart:'Shopping cart',wishlist:'Saved items',seller:'Retailer workspace',admin:'Admin dashboard',about:'About Pashughar',learn:'Learn',contact:'Contact',privacy:'Privacy policy',terms:'Terms & conditions'})[path] || 'Page not found';
+}
+function renderRouteChrome(path, params) {
+  if (path === 'home') return;
+  const title = routeTitle(path, params);
+  let parent = '<a href="#home">Home</a>';
+  if (path.startsWith('product/')) {
+    const p = getProduct(decodeURIComponent(path.slice(8)));
+    parent += ' <span aria-hidden="true">/</span> <a href="#shop">Marketplace</a>';
+    if (p) parent += ' <span aria-hidden="true">/</span> <a href="#shop?category='+encodeURIComponent(normalizeCategoryId(p.category))+'">'+safe(categoryName(p.category))+'</a>';
+  } else if (path === 'pet-section') {
+    parent += ' <span aria-hidden="true">/</span> <a href="#pets">Pets & supplies</a>';
+  } else if (path === 'shop' && params.get('category')) {
+    parent += ' <span aria-hidden="true">/</span> <a href="#shop">Marketplace</a>';
+  }
+  app.insertAdjacentHTML('afterbegin','<div class="route-context"><button type="button" class="route-back-button" data-action="route-back">← Back</button><nav class="route-breadcrumbs" aria-label="Breadcrumb">'+parent+' <span aria-hidden="true">/</span> <strong>'+safe(title)+'</strong></nav></div>');
+}
+function fallbackBackRoute(path) {
+  if (path === 'pet-section') return '#pets';
+  if (path.startsWith('product/')) {
+    const p = getProduct(decodeURIComponent(path.slice(8)));
+    return p ? '#shop?category='+encodeURIComponent(normalizeCategoryId(p.category)) : '#shop';
+  }
+  if (path === 'seller' || path === 'admin') return '#home';
+  if (['shop','cart','wishlist','pets','about','learn','contact'].includes(path)) return '#home';
+  return '#shop';
+}
+
 function render() {
   const {path,params}=getRoute();
   delete app.dataset.sectionTheme;
   document.querySelectorAll('.nav-inner a').forEach(a=>a.classList.toggle('current',a.getAttribute('href')===`#${path}`));
+  const known = ['home','shop','pets','pet-section','cart','account','seller','admin','wishlist','about','learn','contact','privacy','terms'];
   if(path==='home')renderHome();
   else if(path==='shop') { activeShopQuery=params.get('q')??''; activeShopCategory=params.get('category')??''; renderShop(params); }
-  else if(path==='pets') renderPetsHub();
-  else if(path==='pet-section') renderPetSection(params);
+  else if(path==='pets')renderPetsHub();
+  else if(path==='pet-section')renderPetSection(params);
   else if(path.startsWith('product/'))renderProduct(decodeURIComponent(path.slice(8)));
   else if(path==='cart')renderCart();
-  else if(path==='account') { navigate('#shop'); renderShop(new URLSearchParams()); }
+  else if(path==='account')renderSimplePage('account');
   else if(path==='seller') { if(session()?.role==='retailer')renderSellerDashboard(); else renderRetailerLogin(); }
   else if(path==='admin') { if(session()?.role==='admin')renderAdmin(); else renderAdminLogin(); }
   else if(path==='wishlist')renderWishlist();
-  else renderSimplePage(path);
+  else if(known.includes(path))renderSimplePage(path);
+  else renderSimplePage('not-found');
+  renderRouteChrome(path,params);
   updateCartCount();
 }
-function navigate(hash){location.hash=hash;}
+function navigate(hash, options = {}) {
+  const target = String(hash || '#home').startsWith('#') ? String(hash || '#home') : '#'+String(hash);
+  if (target === location.hash && location.hash) return;
+  history.replaceState({... (history.state || {}), pashugharRoute: location.hash || location.pathname, pashugharScrollY: window.scrollY}, '', location.href);
+  history.pushState({pashugharRoute:target,pashugharScrollY:0}, '', target);
+  const nav=document.getElementById('main-nav');
+  nav?.classList.remove('open');
+  document.getElementById('menu-toggle')?.setAttribute('aria-expanded','false');
+  render();
+  if (!options.preserveScroll) window.scrollTo({top:0,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
+}
 function addToCart(id, qty=1){
   const product=getProduct(id);if(!product||product.status!=='approved')return showToast('This product is not available to purchase.','error');
   if(!isAvailable(product))return showToast('This product is sold out.','warn');
@@ -340,10 +410,20 @@ function openProductForm(product=null){
   currentProductImages=(Array.isArray(p.images)&&p.images.length?p.images:[p.image]).filter(Boolean).slice(0,5);activeProductImageIndex=0;
   const imageUrls=currentProductImages.filter(x=>!String(x).startsWith('data:')).join('\n');
   modalContent.innerHTML=`<div class="modal-inner"><div class="modal-head"><div><h2>${product?'Edit listing':'Add a product'}</h2><p>Verified retailers can publish directly. Add accurate details and up to five product photos or hosted image URLs.</p></div><button class="modal-close" data-action="close-modal" aria-label="Close">×</button></div><form id="product-form" data-id="${safe(p.id||'')}"><div class="field"><label for="pf-name">Product name *</label><input id="pf-name" name="name" required maxlength="120" value="${safe(p.name||'')}" placeholder="e.g. Fresh farm eggs"></div><div class="field-grid"><div class="field"><label for="pf-category">Category *</label><select id="pf-category" name="category" required>${CATEGORIES.map(c=>`<option value="${c.id}" ${normalizeCategoryId(p.category)===c.id?'selected':''}>${c.name}</option>`).join('')}</select></div><div class="field"><label for="pf-condition">Product type / condition</label><input id="pf-condition" name="condition" value="${safe(p.condition||'New')}" placeholder="Fresh, new, live animal"></div></div><div class="field"><label for="pf-pet-section">Pet section</label><select id="pf-pet-section" name="petSection"><option value="pets" ${((p.attributes&&p.attributes.petSection)||"pets")==="pets"?"selected":""}>Pets</option><option value="accessories" ${(p.attributes&&p.attributes.petSection)==="accessories"?"selected":""}>Pet accessories</option><option value="breeding" ${(p.attributes&&p.attributes.petSection)==="breeding"?"selected":""}>Pet breeding</option></select><span class="small-muted">For breeding listings, include breed, age, health screening and service location.</span></div><div class="field"><label for="pf-description">Description *</label><textarea id="pf-description" name="description" required maxlength="2500" placeholder="Describe the product clearly">${safe(p.description||'')}</textarea></div><div class="field-grid"><div class="field"><label for="pf-price">Price in NPR *</label><input id="pf-price" name="price" type="number" required min="0.01" max="100000000" step="0.01" value="${safe(p.price??'')}" placeholder="e.g. 750"></div><div class="field"><label for="pf-unit">Selling unit *</label><select id="pf-unit" name="unit" required>${['piece','kg','g','litre','ml','dozen','pack','bag','animal','pair','box'].map(u=>`<option value="${u}" ${p.unit===u?'selected':''}>${u}</option>`).join('')}</select></div></div><div class="field-grid"><div class="field"><label for="pf-stock">Available quantity *</label><input id="pf-stock" name="stock" type="number" required min="0" max="1000000" step="1" value="${safe(p.stock??0)}"></div><div class="field"><label for="pf-location">Location / service area *</label><input id="pf-location" name="location" required maxlength="220" value="${safe(p.location||profile.location||'Pokhara, Nepal')}" placeholder="City / district"></div></div><div class="field"><label for="pf-images">Upload product photos (up to 5)</label><input id="pf-images" name="images" type="file" accept="image/jpeg,image/png,image/webp,image/avif" multiple ${isFirebaseConfigured()?"disabled":""}><span class="small-muted">${isFirebaseConfigured()?"Firebase Storage is disabled. Use public HTTPS image URLs below; uploads are unavailable in this version.":"Photos are resized in your browser and stored locally in this prototype."}</span><div id="pf-image-preview" class="uploaded-image-grid">${currentProductImages.map((src,i)=>`<div><img src="${safe(src)}" alt="Product photo ${i+1}"><button type="button" data-action="remove-product-image" data-index="${i}" aria-label="Remove image">×</button></div>`).join('')}</div></div><div class="field"><label for="pf-image-urls">Or add image URLs (one per line)</label><textarea id="pf-image-urls" name="imageUrls" rows="2" placeholder="https://example.com/product-photo.jpg">${safe(imageUrls)}</textarea></div><div class="field-grid"><div class="field"><label for="pf-attr1">Specification label</label><input id="pf-attr1" name="attr1" value="${safe(Object.keys(p.attributes||{})[0]||'')}" placeholder="e.g. Breed / Weight"></div><div class="field"><label for="pf-attrv1">Specification value</label><input id="pf-attrv1" name="attrv1" value="${safe(Object.values(p.attributes||{})[0]||'')}" placeholder="e.g. Local cross"></div></div><div class="notice notice-info">Stock zero automatically shows <strong>SOLD OUT</strong>. Your listing will become visible as soon as you publish it.</div><div class="modal-actions"><button type="button" class="button button-secondary" data-action="close-modal">Cancel</button><button type="submit" class="button button-primary">${product?'Save changes':'Publish product'} →</button></div></form></div>`;
-  if(typeof modal.showModal==='function')modal.showModal();else modal.setAttribute('open','');
+  showModalWithHistory();
 }
 
-function closeModal(){if(modal.open)modal.close();else modal.removeAttribute('open');}
+let modalHistoryActive = false;
+function showModalWithHistory() {
+  history.pushState({... (history.state || {}), pashugharOverlay:'modal', pashugharScrollY:window.scrollY}, '', location.href);
+  modalHistoryActive = true;
+  if(typeof modal.showModal==='function')modal.showModal();else modal.setAttribute('open','');
+}
+function closeModal() {
+  const wasOpen=Boolean(modal.open || modal.hasAttribute('open'));
+  if(modal.open)modal.close();else modal.removeAttribute('open');
+  if(wasOpen && modalHistoryActive) { modalHistoryActive=false; history.back(); }
+}
 function submitProduct(form){
   const data=new FormData(form);const name=String(data.get('name')||'').trim();const desc=String(data.get('description')||'').trim();const price=Number(data.get('price'));const stock=Number(data.get('stock'));
   const user=session();const profile=retailerProfile(user);if(!user||user.role!=='retailer'||!profile||profile.status!=='approved')return showToast('Only verified retailers can publish products.','error');
@@ -469,7 +549,11 @@ document.addEventListener('click',e=>{
   const actionEl=e.target.closest('[data-action]');
   if(!actionEl)return;
   const action=actionEl.dataset.action;const id=actionEl.dataset.id;
-  if(action==='toggle-theme'){applyTheme(document.body.dataset.theme==='dark'?'light':'dark',true);}
+  if(action==='route-back'){
+    if(history.state?.pashugharRoute && history.length>1) history.back();
+    else navigate(fallbackBackRoute(getRoute().path));
+  }
+  else if(action==='toggle-theme'){applyTheme(document.body.dataset.theme==='dark'?'light':'dark',true);}
   else if(action==='google-signin'){if(!isFirebaseConfigured())return showToast('Firebase is not configured.','warn');signInGoogle().then(()=>showToast('Signed in with Google.')).catch(error=>showToast(firebaseErrorMessage(error),'error'));}
   else if(action==='password-reset'){const prefix=getRoute().path==='admin'?'admin-login':'retailer-login';const email=document.getElementById(`${prefix}-email`)?.value?.trim();if(!email)return showToast('Enter your email address first, then select Forgot password.','warn');resetEmailPassword(email).then(()=>showToast('Password reset email sent.')).catch(error=>showToast(firebaseErrorMessage(error),'error'));}
   else if(action==='add-cart'){addToCart(id);}
@@ -640,11 +724,37 @@ document.addEventListener('submit',e=>{
   }
 });
 
-window.addEventListener('hashchange',()=>{render();scrollTop();document.getElementById('main-nav').classList.remove('open');document.getElementById('menu-toggle')?.setAttribute('aria-expanded','false');});
-document.getElementById('menu-toggle')?.addEventListener('click',()=>{const nav=document.getElementById('main-nav');const open=nav.classList.toggle('open');document.getElementById('menu-toggle').setAttribute('aria-expanded',String(open));});
+document.addEventListener('click', e => {
+  const link=e.target.closest('a[href^="#"]');
+  if(!link || e.defaultPrevented || e.button!==0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || link.target==='_blank')return;
+  const href=link.getAttribute('href');
+  if(!href || href==='#')return;
+  e.preventDefault(); navigate(href);
+}, true);
+document.getElementById('menu-toggle')?.addEventListener('click',()=>{
+  const nav=document.getElementById('main-nav');
+  const open=!nav.classList.contains('open');
+  if(open)history.pushState({... (history.state||{}),pashugharOverlay:'menu',pashugharScrollY:window.scrollY},'',location.href);
+  else if(history.state?.pashugharOverlay==='menu'){nav.classList.remove('open');document.getElementById('menu-toggle').setAttribute('aria-expanded','false');history.back();return;}
+  nav.classList.toggle('open',open);document.getElementById('menu-toggle').setAttribute('aria-expanded',String(open));
+});
+window.addEventListener('popstate',event=>{
+  const nav=document.getElementById('main-nav');
+  if(nav?.classList.contains('open')){nav.classList.remove('open');document.getElementById('menu-toggle')?.setAttribute('aria-expanded','false');return;}
+  if(modalHistoryActive && (modal.open || modal.hasAttribute('open'))){modalHistoryActive=false;if(modal.open)modal.close();else modal.removeAttribute('open');return;}
+  modalHistoryActive=false;render();
+  const y=Number(event.state?.pashugharScrollY);
+  requestAnimationFrame(()=>window.scrollTo({top:Number.isFinite(y)?y:0,behavior:'auto'}));
+});
+window.addEventListener('scroll',()=>{
+  try{history.replaceState({... (history.state||{}),pashugharRoute:location.hash||location.pathname,pashugharScrollY:window.scrollY},'',location.href);}catch{}
+  document.getElementById('back-to-top')?.classList.toggle('visible',window.scrollY>500);
+},{passive:true});
+document.getElementById('back-to-top')?.addEventListener('click',()=>window.scrollTo({top:0,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'}));
 modal?.addEventListener('click',e=>{if(e.target===modal)closeModal();});
 document.getElementById('year').textContent=new Date().getFullYear();
 initializeTheme();
+try{history.replaceState({... (history.state||{}),pashugharRoute:location.hash||location.pathname,pashugharScrollY:window.scrollY},'',location.href);}catch{}
 window.addEventListener('pashughar:cloud-error', event => {
   const detail=event.detail||{};
   showToast(firebaseErrorMessage({code:detail.code,message:detail.message}), 'error');
