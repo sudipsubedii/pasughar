@@ -1,5 +1,5 @@
 import {store, CATEGORIES, money, categoryName, normalizeCategoryId, slugId, safe, hydrateCollection} from './store.js';
-import {isFirebaseConfigured, signInGoogle, signInEmail, createEmailAccount, resetEmailPassword, signOutUser, startFirebaseBridge, getCallable, moderateRetailerDirect, moderateProductDirect, removeProductDirect, createBreedingBooking, updateBreedingBookingStatus} from './firebase.js';
+import {isFirebaseConfigured, signInGoogle, signInEmail, createEmailAccount, resetEmailPassword, signOutUser, sendVerificationEmail, refreshAuthUser, sendPhoneOtp, confirmPhoneOtp, isVerifiedContact, setRememberMe, startFirebaseBridge, getCallable, moderateRetailerDirect, moderateProductDirect, removeProductDirect, createBreedingBooking, updateBreedingBookingStatus} from './firebase.js';
 
 store.init();
 // In Firebase mode, never briefly display fictional sample catalogue/dashboard data while
@@ -29,6 +29,15 @@ let currentProductImages = [];
 let activeProductImageIndex = 0;
 let activeReportFilter = 'open';
 let firebaseSession = null;
+let authMode = 'signin';
+let authChannel = 'email';
+let authRole = 'customer';
+let phoneDraft = '';
+let phoneOtpSent = false;
+let checkoutOtpSent = false;
+let verifiedCheckoutPhone = '';
+let inactivityTimer = null;
+const AUTO_LOGOUT_MS = 30 * 60 * 1000;
 
 const getRoute = () => {
   if (location.hash) {
@@ -287,6 +296,43 @@ function renderWishlist() {
   const ids=store.wishlist();const products=ids.map(getProduct).filter(Boolean);
   app.innerHTML=`<div class="page-wrap"><div class="container"><div class="page-title-row"><div><div class="eyebrow">Saved for later</div><h1>Your wishlist</h1><p>Keep the products you may want to order.</p></div></div>${products.length?`<div class="product-grid">${products.map(productCard).join('')}</div>`:emptyState('♡','No saved products yet','Tap the heart on any product to save it here.','#shop','Browse products')}</div></div>`;
 }
+function renderAuthPage(defaultRole = authRole) {
+  if (['customer','retailer'].includes(defaultRole)) authRole = defaultRole;
+  const roleOptions = '<option value="customer" '+(authRole==='customer'?'selected':'')+'>Customer</option><option value="retailer" '+(authRole==='retailer'?'selected':'')+'>Retailer</option>';
+  const channelTabs = '<div class="auth-channel-tabs"><button type="button" class="'+(authChannel==='email'?'active':'')+'" data-action="auth-channel" data-channel="email">Email and password</button><button type="button" class="'+(authChannel==='phone'?'active':'')+'" data-action="auth-channel" data-channel="phone">Phone OTP</button></div>';
+  const roleField = '<div class="field"><label for="auth-role">I am joining as</label><select id="auth-role" name="role">'+roleOptions+'</select><small>Administrator access is assigned separately and cannot be selected here.</small></div>';
+  const remember = '<label class="remember-choice"><input id="remember-me" type="checkbox" checked> Keep me signed in on this device</label>';
+  const emailPanel = authChannel==='email'
+    ? '<form id="auth-email-form">'+roleField+'<div class="field"><label for="auth-email">Email address</label><input id="auth-email" name="email" type="email" required autocomplete="email" maxlength="254" placeholder="you@example.com"></div><div class="field"><label for="auth-password">Password</label><input id="auth-password" name="password" type="password" minlength="6" required autocomplete="'+(authMode==='signup'?'new-password':'current-password')+'" placeholder="At least 6 characters"></div>'+remember+'<button class="button button-primary button-wide" type="submit">'+(authMode==='signup'?'Create account':'Log in')+' →</button></form><button class="button button-secondary button-wide" data-action="auth-password-reset" type="button">Forgot password?</button><button class="button button-secondary button-wide" data-action="auth-google" type="button">Continue with Google</button>'
+    : '';
+  const phonePanel = authChannel==='phone'
+    ? '<form id="auth-phone-form" onsubmit="return false">'+roleField+'<div class="field"><label for="auth-phone">Mobile number</label><input id="auth-phone" name="phone" inputmode="tel" autocomplete="tel" required value="'+safe(phoneDraft)+'" placeholder="+977 98XXXXXXXX"><small>Nepal numbers such as 98XXXXXXXX are accepted.</small></div><div id="phone-recaptcha-container"></div><button class="button button-primary button-wide" type="button" data-action="send-phone-otp">'+(phoneOtpSent?'Resend verification code':'Send phone OTP')+' →</button>'+(phoneOtpSent?'<div class="field"><label for="auth-otp">6-digit verification code</label><input id="auth-otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required placeholder="Enter code"></div><button class="button button-primary button-wide" type="button" data-action="confirm-phone-otp">Verify and continue →</button>':'')+'</form>'
+    : '';
+  app.innerHTML = '<div class="auth-page"><div class="auth-card auth-card-wide auth-unified"><div class="auth-icon">♙</div><div class="eyebrow">Pashughar account</div><h1>'+(authMode==='signup'?'Create your account':'Log in to Pashughar')+'</h1><p class="auth-description">'+(authMode==='signup'?'Choose customer or retailer. Retailer shops still need admin approval.':'Sign in to continue. Browsing and guest checkout remain available.')+'</p><div class="auth-mode-tabs"><button type="button" class="'+(authMode==='signin'?'active':'')+'" data-action="auth-mode" data-mode="signin">Log in</button><button type="button" class="'+(authMode==='signup'?'active':'')+'" data-action="auth-mode" data-mode="signup">Sign up</button></div>'+channelTabs+emailPanel+phonePanel+'<div class="auth-footnote">Email accounts must verify their email, or use verified phone OTP, before retailer listings can be published. Admin access is controlled by a trusted Firebase claim.</div><a class="auth-back-link" href="#home">← Back to shopping</a></div></div>';
+}
+function renderAccount() {
+  const user = session();
+  if (!user) { renderAuthPage('customer'); return; }
+  const verified = isVerifiedContact({emailVerified:user.emailVerified,phoneNumber:user.phoneNumber});
+  const roleName = user.role==='admin'?'Administrator':user.role==='retailer'?'Retailer':'Customer';
+  const destination = user.role==='admin'?'#admin':user.role==='retailer'?'#seller':'#shop';
+  const verifyBlock = verified
+    ? '<div class="notice notice-info"><strong>Contact verified.</strong> You can continue using your account.</div>'
+    : '<div class="notice notice-warn"><strong>Contact verification needed.</strong> Verify your email or use phone OTP before publishing listings or placing an account-based order.</div>'+(user.email?'<button class="button button-primary" type="button" data-action="send-email-verification">Send verification email</button> ':'')+'<button class="button button-secondary" type="button" data-action="refresh-verification">I have verified — refresh status</button>';
+  app.innerHTML = '<div class="page-wrap"><div class="container"><div class="account-page-card"><a class="button button-secondary" href="#home">← Back to shopping</a><div class="eyebrow">My Pashughar</div><h1>My Account</h1><p class="account-user-name">'+safe(user.name||'Pashughar user')+'</p><p class="small-muted">'+safe(user.email||user.phoneNumber||'')+' · '+roleName+'</p>'+verifyBlock+'<div class="account-actions"><a class="button button-primary" href="'+destination+'">'+(user.role==='admin'?'Open admin dashboard':user.role==='retailer'?'Open retailer dashboard':'Continue shopping')+' →</a><button class="button button-secondary" type="button" data-action="signout">Sign out</button></div><p class="small-muted">Remember me is controlled when you sign in. Unchecked sessions end when the browser session closes. Inactive sessions are signed out automatically.</p></div></div></div>';
+}
+function resetAutoLogoutTimer() {
+  clearTimeout(inactivityTimer);
+  if (!session()) return;
+  inactivityTimer = setTimeout(() => {
+    signOutUser().catch(()=>{});
+    firebaseSession = null;
+    store.saveSession(null);
+    navigate('#login');
+    showToast('You were signed out after 30 minutes of inactivity.','warn');
+  }, AUTO_LOGOUT_MS);
+}
+
 function renderSimplePage(path) {
   const content={
     learn:['Learn about buying and selling safely','Compare listings carefully, confirm the seller and location, check stock status, and request appropriate animal-health or food-safety documentation before arranging a purchase. Retailers should provide accurate descriptions, pricing, stock and location details.'],
@@ -300,6 +346,8 @@ function renderSimplePage(path) {
 function updateCartCount(){
   const cartEl=document.getElementById('cart-count'); if(cartEl)cartEl.textContent=cartCount();
   const savedEl=document.getElementById('wishlist-count'); if(savedEl)savedEl.textContent=store.wishlist().length;
+  const accountLink=document.getElementById('account-link');
+  if(accountLink){const user=session();accountLink.href=user?'#account':'#login';const label=accountLink.querySelector('span');if(label)label.textContent=user?'My Account':'Login';accountLink.setAttribute('aria-label',user?'My Account':'Login');}
 }
 function scrollTop(){window.scrollTo({top:0,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});}
 function renderPetsHub() {
@@ -373,15 +421,17 @@ function render() {
   const {path,params}=getRoute();
   delete app.dataset.sectionTheme;
   document.querySelectorAll('.nav-inner a').forEach(a=>a.classList.toggle('current',a.getAttribute('href')===`#${path}`));
-  const known = ['home','shop','pets','pet-section','cart','account','seller','admin','wishlist','about','learn','contact','privacy','terms'];
+  const known = ['home','shop','pets','pet-section','cart','account','login','seller','admin','wishlist','about','learn','contact','privacy','terms'];
   if(path==='home')renderHome();
+  else if(path==='login')renderAuthPage('customer');
   else if(path==='shop') { activeShopQuery=params.get('q')??''; activeShopCategory=params.get('category')??''; renderShop(params); }
   else if(path==='pets')renderPetsHub();
   else if(path==='pet-section')renderPetSection(params);
   else if(path.startsWith('product/'))renderProduct(decodeURIComponent(path.slice(8)));
   else if(path==='cart')renderCart();
-  else if(path==='account')renderSimplePage('account');
-  else if(path==='seller') { if(session()?.role==='retailer')renderSellerDashboard(); else renderRetailerLogin(); }
+  else if(path==='account')renderAccount();
+  else if(path==='login')renderAuthPage('customer');
+  else if(path==='seller') { if(session()?.role==='retailer')renderSellerDashboard(); else renderAuthPage('retailer'); }
   else if(path==='admin') { if(session()?.role==='admin')renderAdmin(); else renderAdminLogin(); }
   else if(path==='wishlist')renderWishlist();
   else if(known.includes(path))renderSimplePage(path);
@@ -406,10 +456,10 @@ function addToCart(id, qty=1){
   const cart=store.cart();const existing=cart.find(i=>i.id===id);const requested=(existing?Number(existing.qty):0)+Number(qty);
   if(requested>Number(product.stock))return showToast(`Only ${product.stock} ${product.unit||'unit'}${Number(product.stock)===1?'':'s'} available.`,'warn');
   if(existing)existing.qty=requested;else cart.push({id,qty:Number(qty)});
-  store.saveCart(cart);updateCartCount();showToast(`${product.name} added to your cart.`);
+  store.saveCart(cart);updateCartCount();showToast(`${product.name} added to basket.`);
 }
 function updateCartQty(id, delta){const cart=store.cart();const item=cart.find(i=>i.id===id);const p=getProduct(id);if(!item||!p)return;if(delta>0&&item.qty>=Number(p.stock))return showToast('No more stock is available.','warn');item.qty+=delta;if(item.qty<=0){store.saveCart(cart.filter(i=>i.id!==id));}else{store.saveCart(cart);}renderCart();}
-function toggleWishlist(id){const list=store.wishlist();if(list.includes(id)){store.saveWishlist(list.filter(i=>i!==id));showToast('Removed from your wishlist.');}else{store.saveWishlist([...list,id]);showToast('Saved to your wishlist.');}render();}
+function toggleWishlist(id){const list=store.wishlist();if(list.includes(id)){store.saveWishlist(list.filter(i=>i!==id));showToast('Removed from your wishlist.');}else{store.saveWishlist([...list,id]);showToast('Saved to wishlist.');}render();}
 function openProductForm(product=null){
   const user=session();if(!user || user.role!=='retailer')return showToast('Sign in to the retailer workspace first.','warn');const profile=retailerProfile(user);if(!profile||profile.status!=='approved'){if(profile)renderRetailerVerificationState(user,profile);else renderSellerSetup(user);return showToast('Your shop must be verified before publishing products.','warn');}
   const p=product||{};if(product&&!(p.retailerId===user.uid||(user.uid==='demo-retailer'&&p.retailerId==='retailer-demo')))return showToast('You can only edit your own listings.','error');
@@ -433,6 +483,7 @@ function closeModal() {
 function submitProduct(form){
   const data=new FormData(form);const name=String(data.get('name')||'').trim();const desc=String(data.get('description')||'').trim();const price=Number(data.get('price'));const stock=Number(data.get('stock'));
   const user=session();const profile=retailerProfile(user);if(!user||user.role!=='retailer'||!profile||profile.status!=='approved')return showToast('Only verified retailers can publish products.','error');
+  if(isFirebaseConfigured()&&!isVerifiedContact({emailVerified:user.emailVerified,phoneNumber:user.phoneNumber})){showToast('Verify your email or phone before publishing listings.','warn');navigate('#account');return;}
   if(!name||name.length>120||!desc||desc.length>2500||!Number.isFinite(price)||price<=0||price>100000000||!Number.isInteger(stock)||stock<0||stock>1000000)return showToast('Check the product name, description, price and whole-number stock limits.','error');
   const products=allProducts();const id=form.dataset.id;const existing=id?products.find(p=>p.id===id):null;
   if(existing&&!(existing.retailerId===user.uid||(user.uid==='demo-retailer'&&existing.retailerId==='retailer-demo')))return showToast('You can only edit your own listings.','error');
@@ -493,6 +544,7 @@ async function shrinkImage(file){
 function renderProductImagePreview(){const preview=document.getElementById('pf-image-preview');if(!preview)return;const urls=(document.getElementById('pf-image-urls')?.value||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);const local=currentProductImages.filter(x=>String(x).startsWith('data:'));const all=[...urls,...local].slice(0,5);preview.innerHTML=all.map((src,i)=>`<div><img src="${safe(src)}" alt="Product photo ${i+1}"><span>${i+1}</span></div>`).join('');}
 function submitCheckout(form){
   const data=new FormData(form);const cart=store.cart();if(!cart.length)return showToast('Your cart is empty.','error');
+  if(isFirebaseConfigured()&&session()&&!isVerifiedContact({emailVerified:session().emailVerified,phoneNumber:session().phoneNumber})){showToast('Verify your email or phone before ordering.','warn');navigate('#account');return;}
   for(const item of cart){const p=getProduct(item.id);if(!p||p.status!=='approved'||!isAvailable(p)||Number(item.qty)>Number(p.stock))return showToast('One or more items are no longer available in the requested quantity. Review your cart.','error');}
   const name=String(data.get('name')||'').trim(), phone=String(data.get('phone')||'').trim(), address=String(data.get('address')||'').trim(), city=String(data.get('city')||'').trim(), notes=String(data.get('notes')||'').trim();
   if(!name||!phone||!address||!city)return showToast('Complete your name, phone, address and city.','error');
@@ -559,8 +611,38 @@ document.addEventListener('click',e=>{
     if(history.state?.pashugharInternal && history.length>1) history.back();
     else navigate(fallbackBackRoute(getRoute().path));
   }
+  else if(action==='auth-mode'){authMode=actionEl.dataset.mode==='signup'?'signup':'signin';phoneOtpSent=false;renderAuthPage(authRole);}
+  else if(action==='auth-channel'){authChannel=actionEl.dataset.channel==='phone'?'phone':'email';renderAuthPage(authRole);}
+  else if(action==='auth-google'){
+    if(!isFirebaseConfigured())return showToast('Firebase is not configured.','error');
+    const selectedRole=document.getElementById('auth-role')?.value||authRole;
+    const remember=document.getElementById('remember-me')?.checked!==false;
+    signInGoogle(selectedRole,remember).then(()=>showToast('Signed in with Google.')).catch(error=>showToast(firebaseErrorMessage(error),'error'));
+  }
+  else if(action==='send-phone-otp'){
+    if(!isFirebaseConfigured())return showToast('Phone OTP requires Firebase Authentication.','error');
+    const input=document.getElementById('auth-phone');phoneDraft=String(input?.value||'').trim();authRole=document.getElementById('auth-role')?.value||authRole;
+    const remember=document.getElementById('remember-me')?.checked!==false;
+    if(!phoneDraft)return showToast('Enter your mobile number first.','warn');
+    sendPhoneOtp(phoneDraft,authRole,remember).then(()=>{phoneOtpSent=true;renderAuthPage(authRole);showToast('Verification code sent. Enter the code to continue.');}).catch(error=>showToast(firebaseErrorMessage(error),'error'));
+  }
+  else if(action==='confirm-phone-otp'){
+    const code=document.getElementById('auth-otp')?.value||'';authRole=document.getElementById('auth-role')?.value||authRole;
+    confirmPhoneOtp(code,authRole).then(credential=>{firebaseSession={...(firebaseSession||{}),uid:credential.user.uid,name:credential.user.displayName||credential.user.phoneNumber,phoneNumber:credential.user.phoneNumber,email:credential.user.email||'',emailVerified:credential.user.emailVerified,role:authRole,firebase:true};showToast('Phone verified. Signed in successfully.');navigate(authRole==='retailer'?'#seller':'#shop');}).catch(error=>showToast(firebaseErrorMessage(error),'error'));
+  }
+  else if(action==='auth-password-reset'){
+    const email=document.getElementById('auth-email')?.value?.trim();if(!email)return showToast('Enter your email address first.','warn');
+    resetEmailPassword(email).then(()=>showToast('Password reset email sent.')).catch(error=>showToast(firebaseErrorMessage(error),'error'));
+  }
+  else if(action==='send-email-verification'){
+    sendVerificationEmail().then(sent=>showToast(sent===false?'Your email is already verified.':'Verification email sent. Check your inbox.')).catch(error=>showToast(firebaseErrorMessage(error),'error'));
+  }
+  else if(action==='refresh-verification'){
+    refreshAuthUser().then(user=>{if(user)firebaseSession={...(firebaseSession||{}),emailVerified:user.emailVerified,phoneNumber:user.phoneNumber||''};renderAccount();showToast(isVerifiedContact(user)?'Contact verification confirmed.':'Verification is not detected yet.');}).catch(error=>showToast(firebaseErrorMessage(error),'error'));
+  }
+  else if(action==='retry-app'){window.location.reload();}
   else if(action==='toggle-theme'){applyTheme(document.body.dataset.theme==='dark'?'light':'dark',true);}
-  else if(action==='google-signin'){if(!isFirebaseConfigured())return showToast('Firebase is not configured.','warn');signInGoogle().then(()=>showToast('Signed in with Google.')).catch(error=>showToast(firebaseErrorMessage(error),'error'));}
+  else if(action==='google-signin'){if(!isFirebaseConfigured())return showToast('Firebase is not configured.','warn');signInGoogle(getRoute().path==='seller'?'retailer':'customer',document.getElementById('remember-me')?.checked!==false).then(()=>showToast('Signed in with Google.')).catch(error=>showToast(firebaseErrorMessage(error),'error'));}
   else if(action==='password-reset'){const prefix=getRoute().path==='admin'?'admin-login':'retailer-login';const email=document.getElementById(`${prefix}-email`)?.value?.trim();if(!email)return showToast('Enter your email address first, then select Forgot password.','warn');resetEmailPassword(email).then(()=>showToast('Password reset email sent.')).catch(error=>showToast(firebaseErrorMessage(error),'error'));}
   else if(action==='add-cart'){addToCart(id);}
   else if(action==='wishlist'){toggleWishlist(id);}
@@ -636,7 +718,7 @@ document.addEventListener('click',e=>{
   else if(action==='report-filter'){activeReportFilter=actionEl.dataset.filter||'open';renderAdmin();}
   else if(action==='filter-retailer-reports'){const retailerId=actionEl.dataset.retailerId;activeReportFilter='open';renderAdmin();document.querySelectorAll('.report-card').forEach(card=>{card.hidden=card.dataset.retailerId!==retailerId;});}
   else if(action==='admin-list-filter'){document.querySelectorAll('[data-action="admin-list-filter"]').forEach(b=>b.classList.toggle('active',b===actionEl));document.querySelectorAll('#admin-products-body tr').forEach(row=>row.hidden=actionEl.dataset.filter!=='all'&&row.dataset.productStatus!==actionEl.dataset.filter);}
-  else if(action==='signout'){endDemoSession();showToast('You have signed out.');}
+  else if(action==='signout'){endDemoSession();firebaseSession=null;clearTimeout(inactivityTimer);navigate('#home');showToast('You have signed out.');}
   else if(action==='reset-demo'){if(confirm('Reset all locally saved Pashughar demo data to the original sample state?')){store.resetDemo();sellerTab='products';adminTab='products';renderAdmin();showToast('Demo data reset.');}}
 });
 
@@ -660,12 +742,21 @@ document.addEventListener('submit',e=>{
   const form=e.target;
   if(form.id==='global-search'){
     e.preventDefault();const q=String(document.getElementById('search-input').value||'').trim();activeShopQuery=q;activeShopCategory='';navigate(`#shop?q=${encodeURIComponent(q)}`);
-  } else if(form.id==='retailer-login-form'||form.id==='admin-login-form'){
+  } else if(form.id==='auth-email-form'){
+    e.preventDefault();
+    const fd=new FormData(form);const email=String(fd.get('email')||'').trim();const password=String(fd.get('password')||'');
+    authRole=String(fd.get('role')||'customer');const remember=document.getElementById('remember-me')?.checked!==false;
+    if(!email||!password)return showToast('Enter your email and password.','warn');
+    if(!isFirebaseConfigured())return showToast('Connect Firebase Authentication before creating real accounts.','error');
+    const operation=authMode==='signup'?createEmailAccount(email,password,authRole,remember):signInEmail(email,password,authRole,remember);
+    operation.then(()=>{if(authMode==='signup'){showToast('Account created. Check your email for a verification link.');navigate('#account');}else showToast('Signed in successfully.');}).catch(error=>showToast(firebaseErrorMessage(error),'error'));
+  } else if(form.id==='auth-phone-form'){e.preventDefault();}
+  else if(form.id==='retailer-login-form'||form.id==='admin-login-form'){
     e.preventDefault();const fd=new FormData(form);
     if(isFirebaseConfigured()){
       const email=String(fd.get('email')||'').trim();const password=String(fd.get('password')||'');const mode=String(e.submitter?.value||fd.get('authMode')||'signin');
       if(!email||!password)return showToast('Enter your email and password.','warn');
-      const operation=mode==='signup'?createEmailAccount(email,password):signInEmail(email,password);
+      const role=form.id==='retailer-login-form'?'retailer':'customer';const remember=document.getElementById('remember-me')?.checked!==false;const operation=mode==='signup'?createEmailAccount(email,password,role,remember):signInEmail(email,password,role,remember);
       operation.then(()=>showToast(mode==='signup'?'Account created. Complete shop registration next.':'Signed in successfully.')).catch(error=>showToast(firebaseErrorMessage(error),'error'));
       return;
     }
@@ -765,7 +856,10 @@ try{history.replaceState({... (history.state||{}),pashugharRoute:location.hash||
 window.addEventListener('pashughar:cloud-error', event => {
   const detail=event.detail||{};
   showToast(firebaseErrorMessage({code:detail.code,message:detail.message}), 'error');
+  let notice=document.getElementById('cloud-error-retry');
+  if(!notice){notice=document.createElement('div');notice.id='cloud-error-retry';notice.className='cloud-error-banner';notice.setAttribute('role','alert');notice.innerHTML='<strong>Some live data could not be loaded.</strong><span>Check your connection or Firebase permissions, then retry.</span><button type="button" class="button button-secondary" data-action="retry-app">Retry</button>';app.prepend(notice);}
 });
+['pointerdown','keydown','touchstart','mousemove'].forEach(type=>document.addEventListener(type,()=>{if(session())resetAutoLogoutTimer();},{passive:true}));
 window.addEventListener('pashughar:cloud-updated', () => {
   const active=document.activeElement;
   if(active && ['INPUT','TEXTAREA','SELECT'].includes(active.tagName)) return;
@@ -775,7 +869,14 @@ render();
 if(isFirebaseConfigured()) {
   startFirebaseBridge({onSessionChanged: next => {
     firebaseSession = next;
+    if(next)resetAutoLogoutTimer();else clearTimeout(inactivityTimer);
     if (next && next.role === 'admin' && getRoute().path !== 'admin') { navigate('#admin'); return; }
+    if(next && ['login','seller'].includes(getRoute().path)){
+      if(next.role==='retailer')navigate('#seller');
+      else if(next.role==='customer')navigate('#shop');
+      else navigate('#admin');
+      return;
+    }
     if(getRoute().path==='admin' && next && next.role!=='admin') showToast('This account is not authorized for the admin panel.','warn');
     render();
   }});
