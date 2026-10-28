@@ -136,13 +136,24 @@ function productSearchText(product) {
   return searchExpansion([product.name,product.description,product.retailer,product.location,categoryName(product.category),attrs].join(' '));
 }
 function productMatchesQuery(product, query) {
-  const q=searchExpansion(query);
+  const q=normalizeSearchText(query).trim();
   if(!q)return true;
   const hay=productSearchText(product);
   if(hay.includes(q))return true;
-  const queryTokens=q.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
   const hayTokens=hay.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-  return queryTokens.length>0 && queryTokens.every(token=>hayTokens.some(word=>word.includes(token)||(token.length>=4&&editDistance(token,word,1)<=1)));
+  const tokens=q.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const matchesToken=token=>hayTokens.some(word=>word.includes(token)||(token.length>=4&&editDistance(token,word,1)<=1));
+  if(tokens.length&&tokens.every(matchesToken))return true;
+  // Nepali aliases are alternatives; translated words must not become mandatory query tokens.
+  for(const [nepali,english] of Object.entries(NEPALI_SEARCH_ALIASES)){
+    if(q.includes(nepali)){
+      const alternatives=normalizeSearchText(english);
+      if(hay.includes(alternatives))return true;
+      const alternativeTokens=alternatives.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+      if(alternativeTokens.length&&alternativeTokens.every(matchesToken))return true;
+    }
+  }
+  return false;
 }
 function getSearchHistory() {
   try {const value=JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY)||'[]');return Array.isArray(value)?value.filter(x=>x&&typeof x.term==='string'):[];} catch{return [];}
@@ -757,7 +768,7 @@ function addToCart(id, qty=1){
   const product=getProduct(id);if(!product||product.status!=='approved')return showToast('This product is not available to purchase.','error');
   if(!isAvailable(product))return showToast('This product is sold out.','warn');
   const cart=store.cart();const existing=cart.find(i=>i.id===id);const requested=(existing?Number(existing.qty):0)+Number(qty);
-  if(!Number.isFinite(requested)||requested<=0||Math.abs(requested*2-Math.round(requested*2))>0.00001)return showToast('Enter a valid quantity.','warn');
+  if(!Number.isFinite(requested)||requested<=0||Math.abs(requested*2-Math.round(requested*2))>0.00001||(quantityStep(product)===1&&!Number.isInteger(requested)))return showToast('Enter a valid quantity for this product unit.','warn');
   if(requested>Number(product.stock))return showToast(`Only ${product.stock} ${product.unit||'unit'}${Number(product.stock)===1?'':'s'} available.`,'warn');
   if(existing)existing.qty=requested;else cart.push({id,qty:Number(qty)});
   store.saveCart(cart);updateCartCount();showToast(`Added to basket: ${product.name}.`);
