@@ -712,6 +712,14 @@ function renderSimplePage(path) {
   }[path]||['Page not found','The requested page is not available. Return to the marketplace and continue browsing.'];
   app.innerHTML=`<div class="simple-page"><div class="container"><article><div class="eyebrow">Pashughar information</div><h1>${content[0]}</h1><p>${content[1]}</p><a class="button button-primary" href="#home">Back to home</a></article></div></div>`;
 }
+function applySiteSettings(settings = store.siteSettings()) {
+  const bar=document.getElementById('site-announcement');
+  if(bar){
+    const text=String(settings.announcementText||'').trim();
+    bar.textContent=text;
+    bar.style.display=(settings.announcementEnabled!==false&&text)?'flex':'none';
+  }
+}
 function updateCartCount(){
   const cartEl=document.getElementById('cart-count'); if(cartEl)cartEl.textContent=cartCount();
   const savedEl=document.getElementById('wishlist-count'); if(savedEl)savedEl.textContent=store.wishlist().length;
@@ -1018,6 +1026,8 @@ installCustomerFeatureHandlers();
 installAdminFeatureHandlers();
 window.addEventListener('pashughar:admin-toast',event=>showToast(String(event.detail?.message||'Admin action completed.')));
 window.addEventListener('pashughar:customer-toast',event=>showToast(String(event.detail?.message||'Action completed.')));
+window.addEventListener('pashughar:site-settings',event=>{applySiteSettings(event.detail||store.siteSettings());if(getRoute().path==='home')render();});
+window.addEventListener('pashughar:categories',()=>{const active=document.activeElement;if(getRoute().path==='admin'&&adminTab==='categories')return;if(active&&['INPUT','TEXTAREA','SELECT'].includes(active.tagName))return;render();});
 window.addEventListener('pashughar:profile-updated',event=>{if(firebaseSession){firebaseSession.name=event.detail?.displayName||firebaseSession.name;firebaseSession.phoneNumber=event.detail?.phone||firebaseSession.phoneNumber;}render();});
 document.addEventListener('click',e=>{
   const actionEl=e.target.closest('[data-action]');
@@ -1396,6 +1406,7 @@ window.addEventListener('pashughar:cloud-updated', event => {
   if(active && ['INPUT','TEXTAREA','SELECT'].includes(active.tagName)) return;
   render();
 });
+applySiteSettings();
 render();
 if(isFirebaseConfigured()) {
   startFirebaseBridge({onSessionChanged: next => {
