@@ -5,8 +5,14 @@ service cloud.firestore {
     function isAdmin() { return signedIn() && request.auth.token.admin == true; }
     function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
     function retailerPath(uid) { return /databases/$(database)/documents/retailers/$(uid); }
+    function hasVerifiedContact() {
+      return signedIn() && (
+        request.auth.token.email_verified == true
+        || (request.auth.token.phone_number is string && request.auth.token.phone_number.size() > 0)
+      );
+    }
     function isVerifiedRetailer() {
-      return signedIn()
+      return hasVerifiedContact()
         && exists(retailerPath(request.auth.uid))
         && get(retailerPath(request.auth.uid)).data.status == 'approved';
     }
@@ -37,7 +43,7 @@ service cloud.firestore {
       allow read: if isOwner(userId) || isAdmin();
       allow create: if isOwner(userId)
         && request.resource.data.keys().hasOnly(['displayName','email','phone','createdAt','role'])
-        && request.resource.data.role == 'customer';
+        && request.resource.data.role in ['customer','retailer'];
       allow update: if isOwner(userId)
         && request.resource.data.role == resource.data.role
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName','phone','photoURL','updatedAt']);
