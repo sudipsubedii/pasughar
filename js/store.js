@@ -8,10 +8,34 @@ const STORAGE_KEYS = {
   reports: 'pashughar.reports.v1',
   breedingBookings: 'pashughar.breedingBookings.v1',
   enquiries: 'pashughar.enquiries.v1',
-  vetAppointments: 'pashughar.vetAppointments.v1'
+  vetAppointments: 'pashughar.vetAppointments.v1',
+  siteSettings: 'pashughar.siteSettings.v1'
 };
 
+const DEFAULT_SITE_SETTINGS = {
+  announcementText: 'Pashughar — a marketplace built for Nepal',
+  bannerTitle: 'Everything for animals, all in one place.',
+  bannerText: 'Discover livestock, fresh meat, pets, pet essentials and animal products from local retailers.',
+  bannerImage: '',
+  deliveryCharge: 0,
+  commissionPercent: 0
+};
 let persistenceAdapter = null;
+export const hydrateSiteSettings = value => {
+  const next = {...DEFAULT_SITE_SETTINGS, ...(value && typeof value === 'object' ? value : {})};
+  writeJson(STORAGE_KEYS.siteSettings, next);
+  try { window.dispatchEvent(new CustomEvent('pashughar:site-settings', {detail:next})); } catch {}
+};
+export const hydrateCategories = records => {
+  if (!Array.isArray(records) || !records.length) return;
+  const normalized = records.filter(x => x && typeof x.id === 'string' && x.id).map(x => {
+    const previous = CATEGORIES.find(c => c.id === x.id) || {};
+    return {...previous, ...x, palette: {...(previous.palette || {}), ...(x.palette || {})}};
+  });
+  if (!normalized.length) return;
+  CATEGORIES.splice(0, CATEGORIES.length, ...normalized);
+  try { window.dispatchEvent(new CustomEvent('pashughar:categories', {detail:{count:CATEGORIES.length}})); } catch {}
+};
 export const configurePersistenceAdapter = adapter => { persistenceAdapter = adapter || null; };
 const persistCloud = (type, previous, next) => {
   if (!persistenceAdapter || typeof persistenceAdapter[type] !== 'function') return Promise.resolve();
@@ -72,6 +96,7 @@ export const store = {
   saveBreedingBookings: (items) => writeJson(STORAGE_KEYS.breedingBookings, items),
   enquiries: () => readJson(STORAGE_KEYS.enquiries, []),
   vetAppointments: () => readJson(STORAGE_KEYS.vetAppointments, []),
+  siteSettings: () => ({...DEFAULT_SITE_SETTINGS, ...readJson(STORAGE_KEYS.siteSettings, {})}),
   saveVetAppointments: (items) => writeJson(STORAGE_KEYS.vetAppointments, Array.isArray(items) ? items : []),
   saveEnquiries: (items) => { const previous=readJson(STORAGE_KEYS.enquiries,[]); const next=Array.isArray(items)?items:[]; writeJson(STORAGE_KEYS.enquiries,next); return persistCloud('enquiries',previous,next); },
   resetDemo: () => { Object.values(STORAGE_KEYS).forEach(k => localStorage.removeItem(k)); initializeStore(); }
