@@ -1007,6 +1007,8 @@ function endDemoSession() {
 
 // Shared event delegation keeps page templates simple.
 installCustomerFeatureHandlers();
+installAdminFeatureHandlers();
+window.addEventListener('pashughar:admin-toast',event=>showToast(String(event.detail?.message||'Admin action completed.')));
 window.addEventListener('pashughar:customer-toast',event=>showToast(String(event.detail?.message||'Action completed.')));
 window.addEventListener('pashughar:profile-updated',event=>{if(firebaseSession){firebaseSession.name=event.detail?.displayName||firebaseSession.name;firebaseSession.phoneNumber=event.detail?.phone||firebaseSession.phoneNumber;}render();});
 document.addEventListener('click',e=>{
@@ -1124,8 +1126,22 @@ document.addEventListener('click',e=>{
   else if(action==='retailer-order-action'){retailerOrderAction(id,actionEl.dataset.status);}
   else if(action==='booking-status'){updateBreedingBookingStatus(id,actionEl.dataset.status).then(()=>showToast('Breeding request updated.')).catch(error=>showToast(error.message||firebaseErrorMessage(error),'error'));}
   else if(action==='admin-tab'){adminTab=actionEl.dataset.tab;renderAdmin();}
+  else if(action==='admin-new-product'||action==='admin-edit-product'){
+    const user=session();if(!user||user.role!=='admin')return showToast('Administrator access required.','error');
+    const product=action==='admin-edit-product'?allProducts().find(p=>p.id===id):null;
+    if(action==='admin-edit-product'&&!product)return showToast('Product was not found.','warn');
+    modalContent.innerHTML=renderAdminProductForm(product,store.retailers());showModalWithHistory();
+  }
+  else if(action==='approve-product'||action==='reject-product'){
+    const product=allProducts().find(p=>p.id===id);if(!product)return showToast('Product was not found.','warn');
+    const decision=action==='approve-product'?'approved':'rejected';
+    if(decision==='rejected'&&!confirm('Reject listing "'+product.name+'"? It will remain hidden from shoppers.'))return;
+    getCallable('moderateProduct')({productId:id,decision,reason:decision==='approved'?'Approved by admin from moderation queue':'Rejected by admin from moderation queue'})
+      .then(()=>{showToast(decision==='approved'?'Listing approved and published.':'Listing rejected.');renderAdmin();})
+      .catch(error=>showToast(firebaseErrorMessage(error),'error'));
+  }
   else if(action==='suspend-product'||action==='restore-product'||action==='admin-remove-product'){
-    if(isFirebaseConfigured()){if(action==='admin-remove-product'&&!confirm('Permanently remove this listing? Report history will remain.'))return;const p=getProduct(id);if(!p)return;const operation=action==='admin-remove-product'?removeProductDirect({productId:id}):moderateProductDirect({productId:id,decision:action==='suspend-product'?'suspended':'approved',reason:'Admin action from Pashughar dashboard'});operation.then(()=>{showToast(action==='admin-remove-product'?'Product removed.':action==='suspend-product'?'Product suspended.':'Product restored.');renderAdmin();}).catch(error=>showToast(firebaseErrorMessage(error),'error'));return;}
+    if(isFirebaseConfigured()){if(action==='admin-remove-product'&&!confirm('Permanently remove this listing? Report history will remain.'))return;const p=getProduct(id);if(!p)return;const operation=action==='admin-remove-product'?getCallable('removeProduct')({productId:id}):getCallable('moderateProduct')({productId:id,decision:action==='suspend-product'?'suspended':'approved',reason:'Admin action from Pashughar dashboard'});operation.then(()=>{showToast(action==='admin-remove-product'?'Product removed.':action==='suspend-product'?'Product suspended.':'Product restored.');renderAdmin();}).catch(error=>showToast(firebaseErrorMessage(error),'error'));return;}
     const products=allProducts();const p=products.find(x=>x.id===id);if(!p)return;
     if(action==='admin-remove-product'){
       if(!confirm(`Permanently remove “${p.name}” from this demo catalogue? Report history will remain.`))return;
@@ -1136,7 +1152,7 @@ document.addEventListener('click',e=>{
     }
   }
   else if(action==='verify-retailer'||action==='reject-retailer'||action==='suspend-retailer'||action==='reinstate-retailer'||action==='ban-retailer'){
-    if(isFirebaseConfigured()){const r=store.retailers().find(x=>x.id===id);if(!r)return;const decision=action==='verify-retailer'||action==='reinstate-retailer'?'approved':action==='reject-retailer'?'rejected':action==='suspend-retailer'?'suspended':'banned';if(action==='ban-retailer'&&!confirm(`Remove / ban ${r.storeName}? Its listing history will be retained.`))return;moderateRetailerDirect({retailerId:r.ownerId||r.id,decision,reason:'Admin action from Pashughar dashboard'}).then(()=>{showToast(`Shop status changed to ${decision}.`);renderAdmin();}).catch(error=>showToast(firebaseErrorMessage(error),'error'));return;}
+    if(isFirebaseConfigured()){const r=store.retailers().find(x=>x.id===id);if(!r)return;const decision=action==='verify-retailer'||action==='reinstate-retailer'?'approved':action==='reject-retailer'?'rejected':action==='suspend-retailer'?'suspended':'banned';if(action==='ban-retailer'&&!confirm(`Remove / ban ${r.storeName}? Its listing history will be retained.`))return;getCallable('moderateRetailer')({retailerId:r.ownerId||r.id,decision,reason:'Admin action from Pashughar dashboard'}).then(()=>{showToast(`Shop status changed to ${decision}.`);renderAdmin();}).catch(error=>showToast(firebaseErrorMessage(error),'error'));return;}
     const retailers=store.retailers();const r=retailers.find(x=>x.id===id);if(!r)return;
     let next=r.status;
     if(action==='verify-retailer')next='approved';
@@ -1216,7 +1232,10 @@ document.addEventListener('change',async e=>{
 
 document.addEventListener('submit',e=>{
   const form=e.target;
-  if(form.id==='global-search'){
+  if(form.id==='admin-product-form'){
+    e.preventDefault();const button=form.querySelector('button[type="submit"]');if(button){button.disabled=true;button.textContent='Saving product…';}
+    saveAdminProductFromForm(form).then(result=>{closeModal();adminTab='products';renderAdmin();showToast(result.created?'Product created and queued for approval.':'Product changes saved.');}).catch(error=>{if(button){button.disabled=false;button.textContent='Save product';}showToast(firebaseErrorMessage(error),'error');});
+  } else if(form.id==='global-search'){
     e.preventDefault();const q=String(document.getElementById('search-input').value||'').trim();activeShopQuery=q;activeShopCategory='';activeShopPage=1;recordSearch(q);document.getElementById('search-suggestions')?.setAttribute('hidden','');navigate(`#shop?q=${encodeURIComponent(q)}`);
   } else if(form.id==='product-review-form'){
     e.preventDefault();const fd=new FormData(form);const button=form.querySelector('button[type="submit"]');if(button){button.disabled=true;button.textContent='Submitting review…';}
