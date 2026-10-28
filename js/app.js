@@ -21,6 +21,17 @@ let activeShopCategory = '';
 let activeShopQuery = '';
 let activeShopSort = 'featured';
 let activeShopStockOnly = false;
+let activePriceMin = '';
+let activePriceMax = '';
+let activeProvince = '';
+let activeDistrict = '';
+let activeMunicipality = '';
+let activeShopPage = 1;
+const PAGE_SIZE = 12;
+let nearMeEnabled = false;
+let shopperGeo = null;
+let lastSearchSuggestions = [];
+const SEARCH_HISTORY_KEY = 'pashughar.searchHistory.v1';
 let activeShopFiltersVisible = false;
 let sellerTab = 'products';
 let adminTab = 'products';
@@ -88,6 +99,104 @@ const showToast = (message, type = '') => {
   const element = document.createElement('div'); element.className = `toast ${type}`; element.textContent = message;
   toastRegion.append(element); setTimeout(() => element.remove(), 3200);
 };
+const NEPALI_SEARCH_ALIASES = {
+  'गाई':'cow cattle', 'गाईको':'cow cattle', 'गोरु':'ox cattle', 'भैंसी':'buffalo', 'राँगा':'buffalo',
+  'बाख्रा':'goat', 'खसी':'goat meat', 'भेडा':'sheep', 'कुखुरा':'chicken poultry', 'हाँस':'duck',
+  'कुकुर':'dog puppy', 'बिरालो':'cat kitten', 'मासु':'meat', 'कुखुराको मासु':'chicken meat',
+  'दूध':'milk', 'अण्डा':'egg eggs', 'घाँस':'fodder grass', 'दाना':'feed fodder',
+  'औषधि':'medicine medicine', 'भेटेरिनरी':'vet veterinary', 'पशु चिकित्सक':'vet veterinarian',
+  'पाल्तु':'pet companion', 'खोर':'cage coop', 'कलर':'collar', 'डोरी':'leash rope',
+  'खोप':'vaccine vaccination', 'खसीको मासु':'goat meat', 'माछा':'fish', 'सुँगुर':'pig pork'
+};
+const normalizeSearchText = value => String(value ?? '').normalize('NFKC').toLocaleLowerCase().replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[\u200b-\u200f\ufeff]/g,'').replace(/[àáâãäå]/g,'a').replace(/[èéêë]/g,'e').replace(/[ìíîï]/g,'i').replace(/[òóôõö]/g,'o').replace(/[ùúûü]/g,'u');
+function searchExpansion(value) {
+  const text=normalizeSearchText(value);
+  const extras=[];
+  Object.entries(NEPALI_SEARCH_ALIASES).forEach(([nepali,english])=>{if(text.includes(nepali))extras.push(english);});
+  return (text+' '+extras.join(' ')).trim();
+}
+function editDistance(a,b,max=2) {
+  if(Math.abs(a.length-b.length)>max)return max+1;
+  let prev=Array.from({length:b.length+1},(_,i)=>i);
+  for(let i=1;i<=a.length;i++){
+    const cur=[i];let rowMin=i;
+    for(let j=1;j<=b.length;j++){
+      cur[j]=Math.min(cur[j-1]+1,prev[j]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));
+      rowMin=Math.min(rowMin,cur[j]);
+    }
+    if(rowMin>max)return max+1;
+    prev=cur;
+  }
+  return prev[b.length];
+}
+function productSearchText(product) {
+  const attrs=Object.values(product.attributes||{}).join(' ');
+  return searchExpansion([product.name,product.description,product.retailer,product.location,categoryName(product.category),attrs].join(' '));
+}
+function productMatchesQuery(product, query) {
+  const q=searchExpansion(query);
+  if(!q)return true;
+  const hay=productSearchText(product);
+  if(hay.includes(q))return true;
+  const queryTokens=q.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const hayTokens=hay.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  return queryTokens.length>0 && queryTokens.every(token=>hayTokens.some(word=>word.includes(token)||(token.length>=4&&editDistance(token,word,1)<=1)));
+}
+function getSearchHistory() {
+  try {const value=JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY)||'[]');return Array.isArray(value)?value.filter(x=>x&&typeof x.term==='string'):[];} catch{return [];}
+}
+function recordSearch(term) {
+  const cleaned=String(term||'').trim().slice(0,80);if(cleaned.length<2)return;
+  const key=normalizeSearchText(cleaned);
+  const historyItems=getSearchHistory().filter(x=>normalizeSearchText(x.term)!==key);
+  historyItems.unshift({term:cleaned,count:(getSearchHistory().find(x=>normalizeSearchText(x.term)===key)?.count||0)+1,at:Date.now()});
+  try {localStorage.setItem(SEARCH_HISTORY_KEY,JSON.stringify(historyItems.slice(0,30)));} catch {}
+}
+function searchTrendTerms() {
+  return getSearchHistory().sort((a,b)=>Number(b.count||0)-Number(a.count||0)||Number(b.at||0)-Number(a.at||0)).slice(0,6).map(x=>x.term);
+}
+function distanceKm(aLat,aLng,bLat,bLng) {
+  const toRad=value=>value*Math.PI/180;
+  const dLat=toRad(bLat-aLat),dLng=toRad(bLng-aLng);
+  const x=Math.sin(dLat/2)**2+Math.cos(toRad(aLat))*Math.cos(toRad(bLat))*Math.sin(dLng/2)**2;
+  return 6371*2*Math.asin(Math.sqrt(Math.min(1,x)));
+}
+function productCoordinates(product) {
+  const attrs=product.attributes||{};
+  const lat=Number(product.latitude??attrs.latitude),lng=Number(product.longitude??attrs.longitude);
+  return Number.isFinite(lat)&&Number.isFinite(lng)&&Math.abs(lat)<=90&&Math.abs(lng)<=180?{lat,lng}:null;
+}
+function productDistance(product) {
+  const coords=productCoordinates(product);
+  return shopperGeo&&coords?distanceKm(shopperGeo.lat,shopperGeo.lng,coords.lat,coords.lng):Infinity;
+}
+function locationOptions(products,key) {
+  return [...new Set(products.map(p=>String(p.attributes?.[key]||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+}
+function renderSearchTrends() {
+  const terms=searchTrendTerms();
+  if(terms.length)return '<section class="search-trends"><div class="container"><div class="search-trends-heading"><div><div class="eyebrow">Your discovery history</div><h2>Recent searches on this device</h2></div><span class="small-muted">Updates as you search</span></div><div class="search-trend-chips">'+terms.map(term=>'<button type="button" class="search-trend-chip" data-action="search-suggestion" data-query="'+safe(term)+'">'+safe(term)+' <span>↗</span></button>').join('')+'</div></div></section>';
+  const dynamic=CATEGORIES.filter(c=>activeProducts().some(p=>normalizeCategoryId(p.category)===c.id)).slice(0,5);
+  return '<section class="search-trends"><div class="container"><div class="search-trends-heading"><div><div class="eyebrow">Explore by category</div><h2>Start with a category</h2></div></div><div class="search-trend-chips">'+dynamic.map(c=>'<button type="button" class="search-trend-chip" data-action="search-suggestion" data-query="'+safe(c.name)+'">'+safe(c.name)+' <span>↗</span></button>').join('')+'</div></div></section>';
+}
+function renderSearchSuggestionItems(query) {
+  const host=document.getElementById('search-suggestions');const input=document.getElementById('search-input');
+  if(!host||!input)return;
+  const q=String(query||'').trim();
+  if(q.length<1){host.hidden=true;host.innerHTML='';return;}
+  const products=activeProducts().filter(p=>productMatchesQuery(p,q)).slice(0,5);
+  const categories=CATEGORIES.filter(c=>productMatchesQuery({name:c.name,description:c.description,retailer:'',location:'',category:c.id,attributes:{}},q)).slice(0,3);
+  const historyTerms=searchTrendTerms().filter(term=>normalizeSearchText(term).includes(normalizeSearchText(q))).slice(0,3);
+  const list=[];
+  historyTerms.forEach(term=>list.push({type:'Recent search',label:term,query:term}));
+  categories.forEach(c=>list.push({type:'Category',label:c.name,query:c.name,category:c.id}));
+  products.forEach(p=>list.push({type:'Product',label:p.name,meta:money(p.price)+' · '+(p.location||'Nepal'),productId:p.id,query:p.name,image:p.image}));
+  lastSearchSuggestions=list.slice(0,8);
+  if(!list.length){host.innerHTML='<div class="search-suggestion-empty">No direct matches. Press Enter to search all listings.</div>';host.hidden=false;return;}
+  host.innerHTML=list.slice(0,8).map((item,index)=>'<button type="button" role="option" aria-selected="false" class="search-suggestion-item" data-action="search-suggestion" data-query="'+safe(item.query)+'" '+(item.productId?'data-product-id="'+safe(item.productId)+'"':'')+'><span class="search-suggestion-icon">'+(item.type==='Product'?'⌕':item.type==='Category'?'▦':'↺')+'</span><span class="search-suggestion-copy"><strong>'+safe(item.label)+'</strong>'+(item.meta?'<small>'+safe(item.meta)+'</small>':'')+'</span><small class="search-suggestion-type">'+safe(item.type)+'</small></button>').join('');
+  host.hidden=false;
+}
+
 const productCard = p => {
   const canonicalCategory = normalizeCategoryId(p.category);
   const cardCategory = CATEGORIES.some(category => category.id === canonicalCategory) ? canonicalCategory : 'other';
