@@ -48,6 +48,8 @@ service cloud.firestore {
         && data.location is string && data.location.size() <= 220
         && validImageUrl(data.image) && validImages(data.images)
         && data.attributes is map
+        && (!('minOrderQuantity' in data) || (data.minOrderQuantity is number && data.minOrderQuantity >= 0 && data.minOrderQuantity <= data.stock))
+        && (!('orderStep' in data) || (data.orderStep is number && data.orderStep > 0 && data.orderStep <= 1000000))
         && (!('videoUrls' in data) || validVideos(data.videoUrls));
     }
 
@@ -94,14 +96,14 @@ service cloud.firestore {
         && request.resource.data.retailerId == request.auth.uid
         && request.resource.data.status == 'approved'
         && validProduct(request.resource.data)
-        && request.resource.data.keys().hasOnly(['name','category','condition','description','price','unit','stock','location','image','images','videoUrls','attributes','retailer','retailerId','status','createdAt','updatedAt']);
+        && request.resource.data.keys().hasOnly(['name','category','condition','description','price','unit','stock','location','image','images','videoUrls','attributes','retailer','retailerId','status','createdAt','updatedAt','minOrderQuantity','orderStep']);
       allow update: if isAdmin() || (isVerifiedRetailer()
         && resource.data.retailerId == request.auth.uid
         && request.resource.data.retailerId == resource.data.retailerId
         && (request.resource.data.status == resource.data.status || request.resource.data.status in ['approved','paused'])
         && resource.data.status in ['approved','paused']
         && validProduct(request.resource.data)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','category','condition','description','price','unit','stock','location','image','images','attributes','videoUrls','retailer','status','updatedAt']));
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','category','condition','description','price','unit','stock','location','image','images','attributes','videoUrls','retailer','status','updatedAt','minOrderQuantity','orderStep']));
       allow delete: if isAdmin() || (isVerifiedRetailer() && resource.data.retailerId == request.auth.uid);
     }
 
