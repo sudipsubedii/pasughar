@@ -978,6 +978,7 @@ function endDemoSession() {
 
 // Shared event delegation keeps page templates simple.
 installCustomerFeatureHandlers();
+window.addEventListener('pashughar:customer-toast',event=>showToast(String(event.detail?.message||'Action completed.')));
 window.addEventListener('pashughar:profile-updated',event=>{if(firebaseSession){firebaseSession.name=event.detail?.displayName||firebaseSession.name;firebaseSession.phoneNumber=event.detail?.phone||firebaseSession.phoneNumber;}render();});
 document.addEventListener('click',e=>{
   const actionEl=e.target.closest('[data-action]');
