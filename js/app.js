@@ -817,6 +817,15 @@ document.addEventListener('click',e=>{
   else if(action==='close-modal'){closeModal();}
   else if(action==='remove-product-image'){const index=Number(actionEl.dataset.index);const src=currentProductImages[index];if(src&&String(src).startsWith('data:'))currentProductImages=currentProductImages.filter((x,i)=>i!==index);else if(src){const field=document.getElementById('pf-image-urls');if(field){const lines=field.value.split(/\r?\n/).map(x=>x.trim()).filter(Boolean);const urlIndex=currentProductImages.slice(0,index).filter(x=>!String(x).startsWith('data:')).length;lines.splice(urlIndex,1);field.value=lines.join('\n');}currentProductImages=currentProductImages.filter((x,i)=>i!==index);}renderProductImagePreview();}
   else if(action==='seller-tab'){sellerTab=actionEl.dataset.tab;renderSellerDashboard();}
+  else if(action==='pause-product'||action==='resume-product'){
+    const p=getProduct(id);const user=session();
+    if(!p||!(p.retailerId===user?.uid||(user?.uid==='demo-retailer'&&p.retailerId==='retailer-demo')))return showToast('You can only manage your own listings.','error');
+    const nextStatus=action==='pause-product'?'paused':'approved';
+    const changed={...p,status:nextStatus,updatedAt:new Date().toISOString()};
+    const all=allProducts().map(x=>x.id===id?changed:x);
+    Promise.resolve(store.saveProducts(all)).then(()=>{renderSellerDashboard();showToast(nextStatus==='paused'?'Listing paused. It is hidden from the marketplace.':'Listing resumed and published.');}).catch(()=>showToast('Listing status could not be changed. Check Firestore rules and retry.','error'));
+  }
+  else if(action==='retailer-order-action'){retailerOrderAction(id,actionEl.dataset.status);}
   else if(action==='booking-status'){updateBreedingBookingStatus(id,actionEl.dataset.status).then(()=>showToast('Breeding request updated.')).catch(error=>showToast(error.message||firebaseErrorMessage(error),'error'));}
   else if(action==='admin-tab'){adminTab=actionEl.dataset.tab;renderAdmin();}
   else if(action==='suspend-product'||action==='restore-product'||action==='admin-remove-product'){
@@ -893,6 +902,25 @@ document.addEventListener('submit',e=>{
   const form=e.target;
   if(form.id==='global-search'){
     e.preventDefault();const q=String(document.getElementById('search-input').value||'').trim();activeShopQuery=q;activeShopCategory='';navigate(`#shop?q=${encodeURIComponent(q)}`);
+  } else if(form.id==='product-enquiry-form'){
+    e.preventDefault();const fd=new FormData(form);const submit=form.querySelector('button[type="submit"]');if(submit)submit.disabled=true;
+    createProductEnquiry({productId:form.dataset.productId,productName:form.dataset.productName,retailerId:form.dataset.retailerId,customerName:String(fd.get('customerName')||''),customerPhone:String(fd.get('customerPhone')||''),message:String(fd.get('message')||'')})
+      .then(()=>{closeModal();showToast('Enquiry sent to the retailer.');})
+      .catch(error=>{if(submit)submit.disabled=false;showToast(firebaseErrorMessage(error),'error');});
+  } else if(form.classList.contains('enquiry-reply-form')){
+    e.preventDefault();const fd=new FormData(form);const submit=form.querySelector('button[type="submit"]');if(submit)submit.disabled=true;
+    replyToEnquiry(form.dataset.enquiryId,String(fd.get('reply')||'')).then(()=>{showToast('Reply sent to customer.');renderSellerDashboard();}).catch(error=>{if(submit)submit.disabled=false;showToast(firebaseErrorMessage(error),'error');});
+  } else if(form.id==='bulk-price-form'){
+    e.preventDefault();const fd=new FormData(form);const scope=String(fd.get('scope')||'all');const mode=String(fd.get('mode')||'set');const value=Number(fd.get('value'));
+    const user=session();const list=allProducts();const own=list.filter(p=>(p.retailerId===user?.uid||(user?.uid==='demo-retailer'&&p.retailerId==='retailer-demo'))&&(scope==='all'||normalizeCategoryId(p.category)===scope));
+    if(!own.length)return showToast('There are no matching listings for this bulk update.','warn');
+    if(!Number.isFinite(value)||(mode==='percent'&&(value < -100||value>100))||(mode==='set'&&value<=0))return showToast('Enter a valid price or percentage change.','warn');
+    const updated=own.map(p=>{const next=mode==='set'?value:Number(p.price)*(1+value/100);return {...p,price:Math.round(next*100)/100,updatedAt:new Date().toISOString()};});
+    if(updated.some(p=>p.price<=0||p.price>100000000))return showToast('The change would create an invalid price. No listing was changed.','error');
+    const count=updated.length;const description=mode==='set'?'set price for '+count+' listing(s)':'change prices on '+count+' listing(s) by '+value+'%';
+    if(!confirm('Confirm bulk update: '+description+'?'))return;
+    const replacements=new Map(updated.map(p=>[p.id,p]));const save=store.saveProducts(list.map(p=>replacements.get(p.id)||p));
+    Promise.resolve(save).then(()=>{renderSellerDashboard();showToast('Bulk price update saved.');}).catch(()=>showToast('The bulk price update failed. Check retailer permissions and retry.','error'));
   } else if(form.id==='auth-email-form'){
     e.preventDefault();
     const fd=new FormData(form);const email=String(fd.get('email')||'').trim();const password=String(fd.get('password')||'');
