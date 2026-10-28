@@ -105,7 +105,16 @@ service cloud.firestore {
     }
     match /retailerOrders/{retailerOrderId} {
       allow read: if isAdmin() || (signedIn() && resource.data.retailerId == request.auth.uid);
-      allow create, update, delete: if false;
+      allow create, delete: if false;
+      allow update: if (isAdmin() || (signedIn() && resource.data.retailerId == request.auth.uid))
+        && request.resource.data.retailerId == resource.data.retailerId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','statusUpdatedBy','updatedAt'])
+        && request.resource.data.status in ['Confirmed','Rejected','Processing','Shipped','Delivered','Cancelled']
+        && (isAdmin()
+          || (resource.data.status == 'Pending' && request.resource.data.status in ['Confirmed','Rejected','Cancelled'])
+          || (resource.data.status == 'Confirmed' && request.resource.data.status in ['Processing','Cancelled'])
+          || (resource.data.status == 'Processing' && request.resource.data.status in ['Shipped','Cancelled'])
+          || (resource.data.status == 'Shipped' && request.resource.data.status == 'Delivered'));
     }
 
     // Reports are written/moderated only through trusted Cloud Functions.
