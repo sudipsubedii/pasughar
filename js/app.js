@@ -34,6 +34,7 @@ let authMode = 'signin';
 let authChannel = 'email';
 let authRole = 'customer';
 let authGateActive = false;
+let authStateReady = !isFirebaseConfigured();
 let phoneDraft = '';
 let phoneOtpSent = false;
 let checkoutOtpSent = false;
@@ -316,6 +317,7 @@ function renderAuthPage(defaultRole = authRole) {
 }
 function renderAccount() {
   const user = session();
+  if (!user && !authStateReady) { app.innerHTML='<div class="page-wrap"><div class="container"><div class="initial-loading">Checking your account…</div></div></div>'; return; }
   if (!user) { renderAuthPage('customer'); return; }
   authGateActive = false;
   const verified = isVerifiedContact({emailVerified:user.emailVerified,phoneNumber:user.phoneNumber});
@@ -424,6 +426,7 @@ function fallbackBackRoute(path) {
 }
 
 function render() {
+  authGateActive = false;
   const {path,params}=getRoute();
   delete app.dataset.sectionTheme;
   document.querySelectorAll('.nav-inner a').forEach(a=>a.classList.toggle('current',a.getAttribute('href')===`#${path}`));
@@ -909,6 +912,7 @@ window.addEventListener('pashughar:cloud-updated', event => {
 render();
 if(isFirebaseConfigured()) {
   startFirebaseBridge({onSessionChanged: next => {
+    authStateReady = true;
     firebaseSession = next;
     if(next)resetAutoLogoutTimer();else clearTimeout(inactivityTimer);
     if (next && next.role === 'admin' && getRoute().path !== 'admin') { navigate('#admin'); return; }
