@@ -1,5 +1,5 @@
 import {store, CATEGORIES, money, categoryName, normalizeCategoryId, slugId, safe, hydrateCollection} from './store.js';
-import {isFirebaseConfigured, signInGoogle, signInEmail, createEmailAccount, resetEmailPassword, signOutUser, sendVerificationEmail, refreshAuthUser, sendPhoneOtp, confirmPhoneOtp, isVerifiedContact, setRememberMe, startFirebaseBridge, getCallable, moderateRetailerDirect, moderateProductDirect, removeProductDirect, createBreedingBooking, updateBreedingBookingStatus, createProductEnquiry, replyToEnquiry, sendEnquiryMessage, getPublicStoreProfile, getVeterinaryProviders, createVetAppointment, manageVetAppointment, saveCustomerProfile, saveCustomerWishlist, markCustomerNotificationRead, updateRetailerOrderStatusDirect, getPublishedProductReviews, submitProductReview} from './firebase.js';
+import {isFirebaseConfigured, signInGoogle, signInEmail, createEmailAccount, resetEmailPassword, signOutUser, sendVerificationEmail, refreshAuthUser, sendPhoneOtp, confirmPhoneOtp, isVerifiedContact, setRememberMe, startFirebaseBridge, getCallable, moderateRetailerDirect, moderateProductDirect, removeProductDirect, createBreedingBooking, updateBreedingBookingStatus, createProductEnquiry, replyToEnquiry, sendEnquiryMessage, getPublicStoreProfile, getVeterinaryProviders, getAvailableVetSlots, createVetAppointment, manageVetAppointment, saveCustomerProfile, saveCustomerWishlist, markCustomerNotificationRead, updateRetailerOrderStatusDirect, getPublishedProductReviews, submitProductReview} from './firebase.js';
 
 store.init();
 // In Firebase mode, never briefly display fictional sample catalogue/dashboard data while
@@ -796,6 +796,33 @@ function renderVeterinaryProviders() {
     showToast(firebaseErrorMessage(error),'error');
   });
 }
+function wireVetSlotPicker({storeId,dateInputId,slotSelectId,excludeAppointmentId=''}) {
+  const dateInput=document.getElementById(dateInputId);
+  const select=document.getElementById(slotSelectId);
+  const submit=document.querySelector('#'+(dateInputId==='vet-appointment-date'?'vet-booking-form':'vet-reschedule-form')+' button[type="submit"]');
+  if(!dateInput||!select||!submit)return;
+  let requestSequence=0;
+  const refresh=()=>{
+    const sequence=++requestSequence;
+    select.disabled=true;submit.disabled=true;
+    select.innerHTML='<option value="">Checking available times…</option>';
+    if(!dateInput.value){select.innerHTML='<option value="">Choose a date first</option>';return;}
+    getAvailableVetSlots({storeId,appointmentDate:dateInput.value,excludeAppointmentId}).then(result=>{
+      if(sequence!==requestSequence)return;
+      const slots=Array.isArray(result?.slots)?result.slots:[];
+      select.innerHTML=slots.length?'<option value="">Choose a time</option>'+slots.map(slot=>'<option value="'+safe(slot)+'">'+safe(slot)+'</option>').join(''):'<option value="">No available times on this date</option>';
+      select.disabled=!slots.length;
+      submit.disabled=!slots.length;
+    }).catch(error=>{
+      if(sequence!==requestSequence)return;
+      select.innerHTML='<option value="">Could not load times — change date to retry</option>';
+      select.disabled=true;submit.disabled=true;
+      showToast(firebaseErrorMessage(error),'error');
+    });
+  };
+  dateInput.addEventListener('change',refresh);
+  if(dateInput.value)refresh();
+}
 function openVetAppointmentForm(storeId) {
   const user=session();
   if(!user){showToast('Sign in before booking a veterinary appointment.','warn');navigate('#login');return;}
@@ -805,8 +832,9 @@ function openVetAppointmentForm(storeId) {
     const slots=Array.isArray(provider.vetAppointmentSlots)?provider.vetAppointmentSlots:[];
     if(!slots.length)return showToast('This provider has not published appointment slots yet.','warn');
     const today=new Date();const minDate=[today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-');
-    modalContent.innerHTML='<div class="modal-inner"><div class="modal-head"><div><div class="eyebrow">Veterinary appointment</div><h2>Book with '+safe(provider.storeName||'Veterinary provider')+'</h2><p>'+safe(provider.location||'')+'</p></div><button class="modal-close" data-action="close-modal" aria-label="Close">×</button></div><form id="vet-booking-form" data-store-id="'+safe(storeId)+'"><div class="field-grid"><div class="field"><label for="vet-customer-name">Your name *</label><input id="vet-customer-name" name="customerName" required maxlength="120" value="'+safe(user.name||'')+'"></div><div class="field"><label for="vet-customer-phone">Nepali mobile number *</label><input id="vet-customer-phone" name="customerPhone" required inputmode="tel" maxlength="20" value="'+safe(user.phoneNumber||'')+'" placeholder="98XXXXXXXX"></div></div><div class="field"><label for="vet-pet-name">Animal name / identifier</label><input id="vet-pet-name" name="petName" maxlength="100" placeholder="Optional"></div><div class="field"><label for="vet-appointment-date">Appointment date *</label><input id="vet-appointment-date" name="appointmentDate" type="date" min="'+minDate+'" required></div><div class="field"><label for="vet-appointment-slot">Available time (Nepal time) *</label><select id="vet-appointment-slot" name="slot" required>'+slots.map(slot=>'<option value="'+safe(slot)+'">'+safe(slot)+'</option>').join('')+'</select></div><div class="field"><label for="vet-appointment-reason">Reason for visit *</label><textarea id="vet-appointment-reason" name="reason" required minlength="2" maxlength="1000" placeholder="Symptoms, vaccination, routine check-up…"></textarea></div><div class="notice notice-info">The slot is reserved when the booking succeeds. A confirmation and reminders will be available in My appointments and Notifications.</div><div class="modal-actions"><button type="button" class="button button-secondary" data-action="close-modal">Cancel</button><button type="submit" class="button button-primary">Confirm appointment →</button></div></form></div>';
+    modalContent.innerHTML='<div class="modal-inner"><div class="modal-head"><div><div class="eyebrow">Veterinary appointment</div><h2>Book with '+safe(provider.storeName||'Veterinary provider')+'</h2><p>'+safe(provider.location||'')+'</p></div><button class="modal-close" data-action="close-modal" aria-label="Close">×</button></div><form id="vet-booking-form" data-store-id="'+safe(storeId)+'"><div class="field-grid"><div class="field"><label for="vet-customer-name">Your name *</label><input id="vet-customer-name" name="customerName" required maxlength="120" value="'+safe(user.name||'')+'"></div><div class="field"><label for="vet-customer-phone">Nepali mobile number *</label><input id="vet-customer-phone" name="customerPhone" required inputmode="tel" maxlength="20" value="'+safe(user.profilePhone||user.phoneNumber||'')+'" placeholder="98XXXXXXXX"></div></div><div class="field"><label for="vet-pet-name">Animal name / identifier</label><input id="vet-pet-name" name="petName" maxlength="100" placeholder="Optional"></div><div class="field"><label for="vet-appointment-date">Appointment date *</label><input id="vet-appointment-date" name="appointmentDate" type="date" min="'+minDate+'" required></div><div class="field"><label for="vet-appointment-slot">Available time (Nepal time) *</label><select id="vet-appointment-slot" name="slot" required disabled><option value="">Choose a date first</option></select></div><div class="field"><label for="vet-appointment-reason">Reason for visit *</label><textarea id="vet-appointment-reason" name="reason" required minlength="2" maxlength="1000" placeholder="Symptoms, vaccination, routine check-up…"></textarea></div><div class="notice notice-info">Choose a date to check live slot availability. The booking reserves the time only after the secure booking request succeeds.</div><div class="modal-actions"><button type="button" class="button button-secondary" data-action="close-modal">Cancel</button><button type="submit" class="button button-primary" disabled>Confirm appointment →</button></div></form></div>';
     showModalWithHistory();
+    wireVetSlotPicker({storeId,dateInputId:'vet-appointment-date',slotSelectId:'vet-appointment-slot'});
   }).catch(error=>showToast(firebaseErrorMessage(error),'error'));
 }
 function renderCustomerAppointments() {
@@ -830,8 +858,9 @@ function openVetRescheduleForm(appointmentId) {
     const slots=Array.isArray(provider?.vetAppointmentSlots)?provider.vetAppointmentSlots:[];
     if(!slots.length)return showToast('The provider has not published bookable slots. Contact the clinic.','warn');
     const today=new Date();const minDate=[today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-');
-    modalContent.innerHTML='<div class="modal-inner"><div class="modal-head"><div><div class="eyebrow">Change appointment</div><h2>Reschedule appointment</h2><p>'+safe(provider.storeName||appointment.storeName||'Veterinary provider')+'</p></div><button class="modal-close" data-action="close-modal" aria-label="Close">×</button></div><form id="vet-reschedule-form" data-appointment-id="'+safe(appointmentId)+'"><div class="field"><label for="reschedule-date">New date *</label><input id="reschedule-date" name="appointmentDate" type="date" min="'+minDate+'" value="'+safe(appointment.appointmentDate)+'" required></div><div class="field"><label for="reschedule-slot">New time *</label><select id="reschedule-slot" name="slot" required>'+slots.map(slot=>'<option value="'+safe(slot)+'" '+(slot===appointment.slot?'selected':'')+'>'+safe(slot)+'</option>').join('')+'</select></div><div class="notice notice-info">Your previous slot remains reserved unless the reschedule succeeds.</div><div class="modal-actions"><button type="button" class="button button-secondary" data-action="close-modal">Cancel</button><button type="submit" class="button button-primary">Confirm new time</button></div></form></div>';
+    modalContent.innerHTML='<div class="modal-inner"><div class="modal-head"><div><div class="eyebrow">Change appointment</div><h2>Reschedule appointment</h2><p>'+safe(provider.storeName||appointment.storeName||'Veterinary provider')+'</p></div><button class="modal-close" data-action="close-modal" aria-label="Close">×</button></div><form id="vet-reschedule-form" data-appointment-id="'+safe(appointmentId)+'"><div class="field"><label for="reschedule-date">New date *</label><input id="reschedule-date" name="appointmentDate" type="date" min="'+minDate+'" value="'+safe(appointment.appointmentDate)+'" required></div><div class="field"><label for="reschedule-slot">Available new time *</label><select id="reschedule-slot" name="slot" required disabled><option value="">Checking available times…</option></select></div><div class="notice notice-info">Your previous slot remains reserved unless the reschedule succeeds.</div><div class="modal-actions"><button type="button" class="button button-secondary" data-action="close-modal">Cancel</button><button type="submit" class="button button-primary" disabled>Confirm new time</button></div></form></div>';
     showModalWithHistory();
+    wireVetSlotPicker({storeId:appointment.storeId,dateInputId:'reschedule-date',slotSelectId:'reschedule-slot',excludeAppointmentId:appointmentId});
   }).catch(error=>showToast(firebaseErrorMessage(error),'error'));
 }
 function resetAutoLogoutTimer() {
