@@ -244,28 +244,26 @@ service cloud.firestore {
       allow create, delete: if false;
       allow update: if signedIn() && resource.data.userId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read','readAt']) && request.resource.data.read == true;
     }
+    // Appointment records and slot locks are written through trusted callables so slot uniqueness cannot be bypassed.
     match /vetAppointments/{appointmentId} {
       allow read: if isAdmin() || (signedIn() && (resource.data.customerUid == request.auth.uid || resource.data.vetId == request.auth.uid));
-      allow create: if hasVerifiedContact() && request.resource.data.customerUid == request.auth.uid
-        && request.resource.data.vetId is string && request.resource.data.date is string && request.resource.data.time is string
-        && request.resource.data.reason is string && request.resource.data.reason.size() >= 5 && request.resource.data.reason.size() <= 1000
-        && request.resource.data.status == 'pending'
-        && exists(/databases/$(database)/documents/publicStores/$(request.resource.data.vetId))
-        && get(/databases/$(database)/documents/publicStores/$(request.resource.data.vetId)).data.isVet == true;
-      allow update: if isAdmin()
-        || (signedIn() && resource.data.customerUid == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','updatedAt']) && request.resource.data.status == 'cancelled')
-        || (signedIn() && resource.data.vetId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','updatedAt']) && request.resource.data.status in ['confirmed','declined','completed','cancelled']);
-      allow delete: if isAdmin();
+      allow create, update, delete: if false;
+    }
+    match /vetAppointmentSlots/{slotId} {
+      allow read, write: if false;
     }
     match /enquiries/{enquiryId}/messages/{messageId} {
       allow read: if signedIn() && exists(/databases/$(database)/documents/enquiries/$(enquiryId))
         && (get(/databases/$(database)/documents/enquiries/$(enquiryId)).data.customerUid == request.auth.uid
           || get(/databases/$(database)/documents/enquiries/$(enquiryId)).data.retailerId == request.auth.uid || isAdmin());
-      allow create: if hasVerifiedContact() && exists(/databases/$(database)/documents/enquiries/$(enquiryId))
-        && (get(/databases/$(database)/documents/enquiries/$(enquiryId)).data.customerUid == request.auth.uid
-          || get(/databases/$(database)/documents/enquiries/$(enquiryId)).data.retailerId == request.auth.uid)
-        && request.resource.data.senderUid == request.auth.uid && request.resource.data.senderRole in ['customer','retailer']
-        && request.resource.data.message is string && request.resource.data.message.size() >= 2 && request.resource.data.message.size() <= 1500;
+      allow create: if hasVerifiedContact()
+        && request.resource.data.keys().hasOnly(['message','senderUid','senderRole','createdAt'])
+        && exists(/databases/$(database)/documents/enquiries/$(enquiryId))
+        && request.resource.data.senderUid == request.auth.uid
+        && request.resource.data.message is string && request.resource.data.message.size() >= 2 && request.resource.data.message.size() <= 1500
+        && request.resource.data.createdAt == request.time
+        && ((get(/databases/$(database)/documents/enquiries/$(enquiryId)).data.customerUid == request.auth.uid && request.resource.data.senderRole == 'customer')
+          || (get(/databases/$(database)/documents/enquiries/$(enquiryId)).data.retailerId == request.auth.uid && request.resource.data.senderRole == 'retailer'));
       allow update, delete: if false;
     }
     match /newsletterSubscribers/{subscriberId} { allow read, write: if false; }
