@@ -419,6 +419,11 @@ exports.notifyCustomerEnquiryReply = onDocumentUpdated('enquiries/{enquiryId}', 
   const after = event.data && event.data.after.data();
   if (!before || !after || !after.customerUid) return;
   if (String(before.reply || '') === String(after.reply || '') || !String(after.reply || '').trim()) return;
+  // Modern seller chat already creates a message-triggered notification. Avoid double
+  // notifying the customer when the parent enquiry's compatibility reply field is updated.
+  const matchingChat = await db.collection('enquiries').doc(event.params.enquiryId)
+    .collection('messages').where('message', '==', String(after.reply || '')).where('senderRole', '==', 'retailer').limit(1).get();
+  if (!matchingChat.empty) return;
   await createUserNotification(after.customerUid, 'enquiry-reply-' + event.id, {
     title:'Seller replied to your enquiry',
     message:'The seller replied about ' + asText(after.productName || 'your listing enquiry', 140) + '.',
