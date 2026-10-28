@@ -520,6 +520,7 @@ export function startFirebaseBridge({ onSessionChanged }) {
       mergeProducts();
     });
     listen(query(collection(db, 'breedingBookings'), where('retailerId', '==', uid)), snapshot => hydrateCollection('breedingBookings', unpack(snapshot)));
+    listen(query(collection(db, 'vetAppointments'), where('storeId', '==', uid)), snapshot => hydrateCollection('vetAppointments', unpack(snapshot)));
     listen(query(collection(db, 'enquiries'), where('retailerId', '==', uid)), snapshot => hydrateCollection('enquiries', unpack(snapshot)));
     listen(query(collection(db, 'retailerOrders'), where('retailerId', '==', uid)), snapshot => {
       ownRetailerOrderDocs = unpack(snapshot);
@@ -555,6 +556,7 @@ export function startFirebaseBridge({ onSessionChanged }) {
     listen(collection(db, 'orders'), snapshot => hydrateCollection('orders', unpack(snapshot)));
     listen(collection(db, 'reports'), snapshot => hydrateCollection('reports', unpack(snapshot)));
     listen(collection(db, 'breedingBookings'), snapshot => hydrateCollection('breedingBookings', unpack(snapshot)));
+    listen(collection(db, 'vetAppointments'), snapshot => hydrateCollection('vetAppointments', unpack(snapshot)));
     listen(collection(db, 'enquiries'), snapshot => hydrateCollection('enquiries', unpack(snapshot)));
   };
 
@@ -570,6 +572,8 @@ export function startFirebaseBridge({ onSessionChanged }) {
       hydrateCollection('orders', []);
       hydrateCollection('breedingBookings', []);
       hydrateCollection('enquiries', []);
+      hydrateCollection('vetAppointments', []);
+      hydrateCollection('notifications', []);
       startPublicData();
       onSessionChanged(null);
       return;
