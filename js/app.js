@@ -545,7 +545,7 @@ async function shrinkImage(file){
 }
 function renderProductImagePreview(){const preview=document.getElementById('pf-image-preview');if(!preview)return;const urls=(document.getElementById('pf-image-urls')?.value||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);const local=currentProductImages.filter(x=>String(x).startsWith('data:'));const all=[...urls,...local].slice(0,5);preview.innerHTML=all.map((src,i)=>`<div><img src="${safe(src)}" alt="Product photo ${i+1}"><span>${i+1}</span></div>`).join('');}
 function normalizePhoneDigits(value){
-  let digits=String(value||'').replace(/\\D/g,'');
+  let digits=String(value||'').replace(/\D/g,'');
   if(digits.startsWith('977'))return digits;
   if(digits.startsWith('0'))return '977'+digits.slice(1);
   if(digits.startsWith('9'))return '977'+digits;
