@@ -67,7 +67,7 @@ service cloud.firestore {
     match /retailers/{retailerId} {
       allow read: if isOwner(retailerId) || isAdmin();
       allow create: if isOwner(retailerId) && hasRetailerRole()
-        && request.resource.data.keys().hasOnly(['ownerId','storeName','contactName','email','phone','location','description','status','createdAt','updatedAt','openingHours','publicPhone','publicEmail','website','vetSpecialties','vetAvailability','consultationFee','verificationDocs','isVet'])
+        && request.resource.data.keys().hasOnly(['ownerId','storeName','contactName','email','phone','location','description','status','createdAt','updatedAt','openingHours','publicPhone','publicEmail','website','vetSpecialties','vetAvailability','vetAppointmentSlots','consultationFee','verificationDocs','isVet'])
         && request.resource.data.ownerId == request.auth.uid
         && request.resource.data.status == 'pending'
         && request.resource.data.storeName is string && request.resource.data.storeName.size() > 0
