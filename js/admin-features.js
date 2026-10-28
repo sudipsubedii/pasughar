@@ -126,7 +126,7 @@ async function renderAnalytics(host){
   panel('Monthly orders and value','Aggregated from order creation dates. Amounts are order totals, not accounting revenue.',
     buckets.size?'<div class="table-scroll"><table><thead><tr><th>Month</th><th>Orders</th><th>Order value</th></tr></thead><tbody>'+[...buckets.values()].sort((a,b)=>b.month.localeCompare(a.month)).map(r=>'<tr><td>'+esc(r.month)+'</td><td>'+r.orders+'</td><td>'+npr(r.value)+'</td></tr>').join('')+'</tbody></table></div>':'<p class="small-muted">No dated orders available.</p>')+
   panel('Catalogue by category','Listings and combined stock by category.',
-    '<div class="table-scroll"><table><thead><tr><th>Category</th><th>Listings</th><th>Stock units</th></tr></thead><tbody>'+[...categoryRows.values()].sort((a,b)=>b.listings-a.listings).map(r=>'<tr><td>'+esc(r.category)+'</td><td>'+r.listings+'</td><td>'+r.stock.toLocaleString('en-IN')</td></tr>').join('')+'</tbody></table></div>');
+    '<div class="table-scroll"><table><thead><tr><th>Category</th><th>Listings</th><th>Stock units</th></tr></thead><tbody>'+[...categoryRows.values()].sort((a,b)=>b.listings-a.listings).map(r=>'<tr><td>'+esc(r.category)+'</td><td>'+r.listings+'</td><td>'+String(r.stock)</td></tr>').join('')+'</tbody></table></div>');
 }
 
 export function installAdminFeatureHandlers(){
