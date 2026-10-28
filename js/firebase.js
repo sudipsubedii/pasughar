@@ -42,6 +42,7 @@ googleProvider.setCustomParameters({ prompt: 'select_account' });
 
 let phoneVerifier = null;
 let phoneConfirmationResult = null;
+let pendingAuthRole = 'customer';
 
 export async function setRememberMe(rememberMe = true) {
   await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
@@ -63,12 +64,14 @@ async function ensureUserProfile(user, requestedRole = 'customer') {
   return profile;
 }
 export const signInGoogle = async (role = 'customer', rememberMe = true) => {
+  pendingAuthRole = ['customer','retailer'].includes(role) ? role : 'customer';
   await setRememberMe(rememberMe);
   const credential = await signInWithPopup(auth, googleProvider);
   await ensureUserProfile(credential.user, role);
   return credential;
 };
 export const signInEmail = async (email, password, role = 'customer', rememberMe = true) => {
+  pendingAuthRole = ['customer','retailer'].includes(role) ? role : 'customer';
   await setRememberMe(rememberMe);
   const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
   await ensureUserProfile(credential.user, role);
@@ -76,6 +79,7 @@ export const signInEmail = async (email, password, role = 'customer', rememberMe
 };
 export const createEmailAccount = async (email, password, role = 'customer', rememberMe = true) => {
   if (!['customer','retailer'].includes(role)) throw new Error('Choose customer or retailer for sign-up.');
+  pendingAuthRole = role;
   await setRememberMe(rememberMe);
   const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
   await ensureUserProfile(credential.user, role);
@@ -96,16 +100,17 @@ export const refreshAuthUser = async () => {
   return auth.currentUser;
 };
 function normalizePhoneNumber(value) {
-  let phone = String(value || '').trim().replace(/[\\s().-]/g, '');
+  let phone = String(value || '').trim().replace(/[\s().-]/g, '');
   if (/^0[0-9]{9,10}$/.test(phone)) phone = '+977' + phone.slice(1);
   else if (/^9[0-9]{9}$/.test(phone)) phone = '+977' + phone;
   else if (/^977[0-9]{9,10}$/.test(phone)) phone = '+' + phone;
   else if (!phone.startsWith('+')) phone = '+' + phone;
-  if (!/^\\+[1-9][0-9]{7,14}$/.test(phone)) throw new Error('Enter a valid phone number with country code, for example +97798XXXXXXXX.');
+  if (!/^\+[1-9][0-9]{7,14}$/.test(phone)) throw new Error('Enter a valid phone number with country code, for example +97798XXXXXXXX.');
   return phone;
 }
 export async function sendPhoneOtp(phone, role = 'customer', rememberMe = true) {
   if (!['customer','retailer'].includes(role)) throw new Error('Choose customer or retailer for sign-in.');
+  pendingAuthRole = role;
   await setRememberMe(rememberMe);
   const normalized = normalizePhoneNumber(phone);
   if (!phoneVerifier) phoneVerifier = new RecaptchaVerifier(auth, 'phone-recaptcha-container', {size:'invisible'});
@@ -397,19 +402,9 @@ export function startFirebaseBridge({ onSessionChanged }) {
         getDoc(doc(db, 'users', user.uid)),
         getDoc(doc(db, 'retailers', user.uid))
       ]);
-      if (profileSnap.exists()) profileData = profileSnap.data() || {};
       retailerExists = retailerSnap.exists();
-      if (!profileSnap.exists()) {
-        const role = retailerExists ? 'retailer' : 'customer';
-        await setDoc(doc(db, 'users', user.uid), {
-          displayName: user.displayName || '',
-          email: user.email || '',
-          phone: user.phoneNumber || '',
-          createdAt: serverTimestamp(),
-          role
-        });
-        profileData = {role};
-      }
+      if (profileSnap.exists()) profileData = profileSnap.data() || {};
+      else profileData = {role: retailerExists ? 'retailer' : pendingAuthRole};
     } catch (error) { fireError(error); }
     if (run !== authRun) return;
     const isAdmin = claims.admin === true;
