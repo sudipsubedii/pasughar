@@ -64,7 +64,7 @@ exports.createOrder = onCall(async (request) => {
   for (const item of items) {
     const productId = cleanId(item && item.productId, 160);
     const quantity = Number(item && item.quantity);
-    if (!productId || !Number.isInteger(quantity) || quantity < 1 || quantity > 1000) {
+    if (!productId || !Number.isFinite(quantity) || quantity <= 0 || quantity > 1000 || Math.abs(quantity * 100 - Math.round(quantity * 100)) > 0.0001) {
       throw new HttpsError('invalid-argument', 'One or more product quantities are invalid.');
     }
     consolidated.set(productId, (consolidated.get(productId) || 0) + quantity);
@@ -97,7 +97,8 @@ exports.createOrder = onCall(async (request) => {
       if (product.status !== 'approved' || retailerStatus.get(product.retailerId) !== 'approved') {
         throw new HttpsError('failed-precondition', `${product.name || 'A product'} is not available.`);
       }
-      if (!Number.isInteger(product.stock) || product.stock < quantity) throw new HttpsError('failed-precondition', `${product.name || 'A product'} does not have enough stock.`);
+      if (!Number.isFinite(Number(product.stock)) || Number(product.stock) < quantity) throw new HttpsError('failed-precondition', `${product.name || 'A product'} does not have enough stock.`);
+      if (!['kg','litre'].includes(String(product.unit||'').toLowerCase()) && !Number.isInteger(quantity)) throw new HttpsError('invalid-argument', `${product.name || 'This product'} must be ordered in whole units.`);
       if (typeof product.price !== 'number' || product.price <= 0) throw new HttpsError('failed-precondition', 'A product has an invalid price.');
       if (!product.retailerId) throw new HttpsError('failed-precondition', 'A product is missing its retailer assignment.');
       const lineTotal = Math.round(product.price * quantity * 100) / 100;
@@ -116,7 +117,7 @@ exports.createOrder = onCall(async (request) => {
 
     resolvedItems.forEach((item, index) => {
       const original = snapshots[index].data();
-      tx.update(productRefs[index], {stock: original.stock - item.quantity, updatedAt: FieldValue.serverTimestamp()});
+      tx.update(productRefs[index], {stock: Math.round((Number(original.stock) - item.quantity) * 100) / 100, updatedAt: FieldValue.serverTimestamp()});
     });
     tx.create(orderRef, {
       customerId: auth ? auth.uid : null,
