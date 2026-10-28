@@ -444,8 +444,9 @@ let lastRemovedCartItem = null;
 let lastCompletedOrder = null;
 const NEPAL_PHONE_PATTERN = /^(?:\+977[- ]?)?(?:0)?9[6-8]\d{8}$/;
 function isValidNepaliPhone(value) {
-  const digits = String(value || '').replace(/[\s().-]/g, '');
-  return /^(?:\+977)?9[6-8]\d{8}$/.test(digits) || /^0?9[6-8]\d{8}$/.test(digits);
+  const digits = String(value || '').replace(/\D/g, '');
+  const local = digits.startsWith('977') ? digits.slice(3) : digits.startsWith('0') ? digits.slice(1) : digits;
+  return /^9[6-8]\d{8}$/.test(local);
 }
 function getSavedAddresses() {
   try { const value = JSON.parse(localStorage.getItem(SAVED_ADDRESSES_KEY) || '[]'); return Array.isArray(value) ? value : []; } catch { return []; }
