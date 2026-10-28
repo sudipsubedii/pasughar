@@ -800,7 +800,7 @@ exports.deleteAdminCategory = onCall(async request => {
   if (!id) throw new HttpsError('invalid-argument','Category ID is required.');
   const usage = await db.collection('products').where('category','==',id).limit(1).get();
   if (!usage.empty) throw new HttpsError('failed-precondition','This category is used by at least one listing. Reassign those listings before hiding it.');
-  await db.collection('categories').doc(id).set({id,active:false,updatedAt:FieldValue.serverTimestamp(),updatedBy:actor.uid},{merge:true});
+  await db.collection('categories').doc(id).set({id,active:false,updatedAt:FieldValue.serverTimestamp()},{merge:true});
   await db.collection('auditLogs').add({actorId:actor.uid,action:'category_hidden',targetId:id,createdAt:FieldValue.serverTimestamp()});
   return {id,deleted:true,active:false};
 });
