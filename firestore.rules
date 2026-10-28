@@ -72,7 +72,7 @@ service cloud.firestore {
       allow update: if isAdmin() || (isOwner(retailerId) && hasRetailerRole()
         && request.resource.data.ownerId == resource.data.ownerId
         && request.resource.data.status == resource.data.status
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['description','phone','location','updatedAt','openingHours','publicPhone','publicEmail','website','vetSpecialties','vetAvailability','consultationFee','verificationDocs']));
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['description','phone','location','updatedAt','openingHours','publicPhone','publicEmail','website','vetSpecialties','vetAvailability','consultationFee','verificationDocs','isVet']));
       allow delete: if isAdmin();
     }
 
