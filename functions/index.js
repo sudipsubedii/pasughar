@@ -776,6 +776,10 @@ exports.saveAdminCategory = onCall(async request => {
   }
   const ref = db.collection('categories').doc(id);
   const previous = await ref.get();
+  if (!active) {
+    const usage = await db.collection('products').where('category','==',id).limit(1).get();
+    if (!usage.empty) throw new HttpsError('failed-precondition','This category is used by at least one listing. Reassign those listings before hiding it.');
+  }
   await ref.set({
     id,name,short,icon,kicker,description,cardDescription,active,
     image:image || (previous.exists ? asText(previous.data().image,2048) : ''),
