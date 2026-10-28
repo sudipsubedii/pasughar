@@ -725,9 +725,12 @@ exports.manageUserAccount = onCall(async request => {
     throw new HttpsError('failed-precondition','You cannot suspend or ban the administrator account currently in use.');
   }
   const auth = getAdminAuth();
+  const target = await auth.getUser(uid);
+  if (target.customClaims && target.customClaims.admin === true && ['suspend','ban'].includes(action)) {
+    throw new HttpsError('failed-precondition','Another trusted administrator account cannot be suspended or banned through this user-management panel.');
+  }
   let result = {};
   if (action === 'reset-password') {
-    const target = await auth.getUser(uid);
     if (!target.email) throw new HttpsError('failed-precondition','This account has no email address for password reset. Phone OTP accounts must use phone authentication.');
     const actionLink = await auth.generatePasswordResetLink(target.email);
     result = {uid,action,actionLink,email:target.email};
