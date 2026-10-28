@@ -399,8 +399,9 @@ function routeTitle(path, params) {
   return ({pets:'Pets & supplies',cart:'Shopping cart',wishlist:'Saved items',seller:'Retailer workspace',admin:'Admin dashboard',about:'About Pashughar',learn:'Learn',contact:'Contact',privacy:'Privacy policy',terms:'Terms & conditions'})[path] || 'Page not found';
 }
 function renderRouteChrome(path, params) {
-  if (['home','admin','login','account','seller','pets','pet-section','about','learn','contact','privacy','terms'].includes(path)) return;
-  if (!['shop','cart','wishlist'].includes(path) && !path.startsWith('product/')) return;
+  if (['home','admin','login','account','pets','pet-section','about','learn','contact','privacy','terms'].includes(path)) return;
+  if (path==='seller' && session()?.role!=='retailer') return;
+  if (!['shop','cart','wishlist','seller'].includes(path) && !path.startsWith('product/')) return;
   const title = routeTitle(path, params);
   let parent = '<a href="#home">Home</a>';
   if (path.startsWith('product/')) {
@@ -629,8 +630,8 @@ document.addEventListener('click',e=>{
     if(history.state?.pashugharInternal && history.length>1) history.back();
     else navigate(fallbackBackRoute(getRoute().path));
   }
-  else if(action==='auth-mode'){authMode=actionEl.dataset.mode==='signup'?'signup':'signin';phoneOtpSent=false;renderAuthPage(authRole);}
-  else if(action==='auth-channel'){authChannel=actionEl.dataset.channel==='phone'?'phone':'email';phoneOtpSent=false;renderAuthPage(authRole);}
+  else if(action==='auth-mode'){authRole=document.getElementById('auth-role')?.value||authRole;authMode=actionEl.dataset.mode==='signup'?'signup':'signin';phoneOtpSent=false;renderAuthPage(authRole);}
+  else if(action==='auth-channel'){authRole=document.getElementById('auth-role')?.value||authRole;authChannel=actionEl.dataset.channel==='phone'?'phone':'email';phoneOtpSent=false;renderAuthPage(authRole);}
   else if(action==='auth-google'){
     if(!isFirebaseConfigured())return showToast('Firebase is not configured.','error');
     const selectedRole=document.getElementById('auth-role')?.value||authRole;
