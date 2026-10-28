@@ -344,7 +344,7 @@ function routeTitle(path, params) {
   return ({pets:'Pets & supplies',cart:'Shopping cart',wishlist:'Saved items',seller:'Retailer workspace',admin:'Admin dashboard',about:'About Pashughar',learn:'Learn',contact:'Contact',privacy:'Privacy policy',terms:'Terms & conditions'})[path] || 'Page not found';
 }
 function renderRouteChrome(path, params) {
-  if (path === 'home') return;
+  if (path === 'home' || path === 'admin' || (path === 'seller' && session()?.role !== 'retailer')) return;
   const title = routeTitle(path, params);
   let parent = '<a href="#home">Home</a>';
   if (path.startsWith('product/')) {
