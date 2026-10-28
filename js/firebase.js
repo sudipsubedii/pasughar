@@ -137,6 +137,27 @@ export async function confirmPhoneOtp(code, role = 'customer') {
 export const isVerifiedContact = user => Boolean(user && (user.emailVerified === true || (typeof user.phoneNumber === 'string' && user.phoneNumber.length > 0)));
 export const signOutUser = () => signOut(auth);
 export const getCallable = name => httpsCallable(functions, name);
+export async function updateRetailerOrderStatusDirect({retailerOrderId,status}) {
+  const user=auth.currentUser;
+  if(!user)throw new Error('Sign in as the assigned retailer first.');
+  const allowed=['Confirmed','Rejected','Processing','Shipped','Delivered','Cancelled'];
+  if(!retailerOrderId||!allowed.includes(status))throw new Error('Choose a valid order status.');
+  const ref=doc(db,'retailerOrders',retailerOrderId);
+  const snap=await getDoc(ref);
+  if(!snap.exists())throw new Error('Order was not found.');
+  const order=snap.data();
+  if(order.retailerId!==user.uid)throw new Error('You can update only orders assigned to your shop.');
+  const transitions={
+    Pending:['Confirmed','Rejected','Cancelled'],
+    Confirmed:['Processing','Cancelled'],
+    Processing:['Shipped','Cancelled'],
+    Shipped:['Delivered'],
+    Delivered:[],Rejected:[],Cancelled:[]
+  };
+  if(!(transitions[order.status]||[]).includes(status))throw new Error('This order status cannot be changed from '+String(order.status)+'.');
+  await updateDoc(ref,{status,statusUpdatedBy:user.uid,updatedAt:serverTimestamp()});
+  return {retailerOrderId,status};
+}
 export async function getPublicStoreProfile(storeId) {
   if (!storeId) throw new Error('Store ID is missing.');
   const snap = await getDoc(doc(db,'publicStores',storeId));
