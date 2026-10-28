@@ -437,6 +437,7 @@ export function startFirebaseBridge({ onSessionChanged }) {
     listen(doc(db, 'retailers', uid), snapshot => {
       const profile = snapshot.exists() ? [{ id: snapshot.id, ...toPlain(snapshot.data()) }] : [];
       hydrateCollection('retailers', profile);
+      if (profile[0]?.status === 'approved') writePublicStore(profile[0]).catch(fireError);
     });
     listen(query(collection(db, 'products'), where('retailerId', '==', uid)), snapshot => {
       ownProducts = unpack(snapshot);
