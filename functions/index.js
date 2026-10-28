@@ -519,6 +519,9 @@ function validateVetSlot(date, time) {
   if (typeof time !== 'string' || !/^(?:09|1[0-6]):(?:00|30)$/.test(time)) {
     throw new HttpsError('invalid-argument', 'Choose a listed half-hour slot between 09:00 and 16:30 Nepal time.');
   }
+  const [year, month, day] = date.split('-').map(Number);
+  const daysInMonth = month >= 1 && month <= 12 ? new Date(Date.UTC(year, month, 0)).getUTCDate() : 0;
+  if (!daysInMonth || day < 1 || day > daysInMonth) throw new HttpsError('invalid-argument', 'Choose a real calendar date.');
   const startAt = new Date(date + 'T' + time + ':00+05:45');
   if (!Number.isFinite(startAt.getTime()) || startAt.getTime() <= Date.now()) {
     throw new HttpsError('failed-precondition', 'Appointment must be scheduled for a future time.');
