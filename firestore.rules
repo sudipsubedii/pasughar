@@ -1,7 +1,12 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
+    function signedIn() {
+      return request.auth != null
+        && (!exists(userPath(request.auth.uid))
+          || !('adminStatus' in get(userPath(request.auth.uid)).data)
+          || get(userPath(request.auth.uid)).data.adminStatus == 'active');
+    }
     function isAdmin() { return signedIn() && request.auth.token.admin == true; }
     function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
     function retailerPath(uid) { return /databases/$(database)/documents/retailers/$(uid); }
