@@ -50,7 +50,7 @@ exports.createOrder = onCall(async (request) => {
   if (!Array.isArray(items) || items.length < 1 || items.length > 30) {
     throw new HttpsError('invalid-argument', 'Add between 1 and 30 order lines.');
   }
-  if (!shipping || !asText(shipping.name, 120) || !asText(shipping.phone, 40) || !asText(shipping.address, 300) || !asText(shipping.city, 100)) {
+  if (!shipping || !asText(shipping.name, 120) || !asText(shipping.phone, 40) || !asText(shipping.address, 300) || !asText(shipping.city, 100) || !asText(shipping.province, 80) || !asText(shipping.district, 100) || !asText(shipping.municipality, 120) || !['morning','midday','afternoon','coordinate'].includes(asText(shipping.deliverySlot, 30))) {
     throw new HttpsError('invalid-argument', 'Complete all required delivery details.');
   }
   if (!['cod', 'contact_seller'].includes(paymentMethod)) {
@@ -98,6 +98,10 @@ exports.createOrder = onCall(async (request) => {
         throw new HttpsError('failed-precondition', `${product.name || 'A product'} is not available.`);
       }
       if (!Number.isFinite(Number(product.stock)) || Number(product.stock) < quantity) throw new HttpsError('failed-precondition', `${product.name || 'A product'} does not have enough stock.`);
+      const minOrderQuantity = Number(product.minOrderQuantity ?? product.attributes?.minOrderQuantity ?? 0);
+      const orderStep = Number(product.orderStep ?? product.attributes?.orderStep ?? (['kg','litre'].includes(String(product.unit||'').toLowerCase()) ? 0.5 : 1));
+      if (minOrderQuantity > 0 && quantity < minOrderQuantity) throw new HttpsError('invalid-argument', `${product.name || 'This product'} must be ordered in quantities of at least ${minOrderQuantity} ${product.unit || 'unit'}.`);
+      if (!Number.isFinite(orderStep) || orderStep <= 0 || Math.abs(quantity / orderStep - Math.round(quantity / orderStep)) > 0.0001) throw new HttpsError('invalid-argument', `${product.name || 'This product'} must be ordered in increments of ${orderStep} ${product.unit || 'unit'}.`);
       if (!['kg','litre'].includes(String(product.unit||'').toLowerCase()) && !Number.isInteger(quantity)) throw new HttpsError('invalid-argument', `${product.name || 'This product'} must be ordered in whole units.`);
       if (typeof product.price !== 'number' || product.price <= 0) throw new HttpsError('failed-precondition', 'A product has an invalid price.');
       if (!product.retailerId) throw new HttpsError('failed-precondition', 'A product is missing its retailer assignment.');
@@ -123,7 +127,7 @@ exports.createOrder = onCall(async (request) => {
       customerId: auth ? auth.uid : null,
       customerEmail: asText((auth && auth.token.email) || shipping.email, 254),
       customerName: asText(shipping.name, 120),
-      shipping: {name: asText(shipping.name, 120), phone: asText(shipping.phone, 40), address: asText(shipping.address, 300), city: asText(shipping.city, 100), email: asText(shipping.email || (auth && auth.token.email) || '', 254)},
+      shipping: {name: asText(shipping.name, 120), phone: asText(shipping.phone, 40), address: asText(shipping.address, 300), city: asText(shipping.city, 100), province: asText(shipping.province, 80), district: asText(shipping.district, 100), municipality: asText(shipping.municipality, 120), deliverySlot: asText(shipping.deliverySlot, 30), email: asText(shipping.email || (auth && auth.token.email) || '', 254)},
       notes: asText(shipping.notes, 800),
       items: resolvedItems,
       productIds: resolvedItems.map(item => item.productId),
@@ -142,7 +146,7 @@ exports.createOrder = onCall(async (request) => {
         orderId: orderRef.id, retailerId, customerId: auth ? auth.uid : null,
         customerName: asText(shipping.name, 120),
         customerEmail: asText(shipping.email || (auth && auth.token.email) || '', 254),
-        shipping: {name: asText(shipping.name, 120), phone: asText(shipping.phone, 40), address: asText(shipping.address, 300), city: asText(shipping.city, 100)},
+        shipping: {name: asText(shipping.name, 120), phone: asText(shipping.phone, 40), address: asText(shipping.address, 300), city: asText(shipping.city, 100), province: asText(shipping.province, 80), district: asText(shipping.district, 100), municipality: asText(shipping.municipality, 120), deliverySlot: asText(shipping.deliverySlot, 30)},
         items: retailerItems,
         subtotal: Math.round(retailerItems.reduce((sum, i) => sum + i.lineTotal, 0) * 100) / 100,
         paymentMethod, status: 'Pending', createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp()
