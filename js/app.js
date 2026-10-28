@@ -442,7 +442,7 @@ function renderProduct(id) {
 const SAVED_ADDRESSES_KEY = 'pashughar.savedAddresses.v1';
 let lastRemovedCartItem = null;
 let lastCompletedOrder = null;
-const NEPAL_PHONE_PATTERN = /^(?:\\+977[- ]?)?(?:0)?9[6-8]\\d{8}$/;
+const NEPAL_PHONE_PATTERN = /^(?:\+977[- ]?)?(?:0)?9[6-8]\d{8}$/;
 function isValidNepaliPhone(value) {
   const digits = String(value || '').replace(/[\s().-]/g, '');
   return /^(?:\+977)?9[6-8]\d{8}$/.test(digits) || /^0?9[6-8]\d{8}$/.test(digits);
