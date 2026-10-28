@@ -4,6 +4,7 @@ const {onDocumentCreated, onDocumentUpdated} = require('firebase-functions/v2/fi
 const {onSchedule} = require('firebase-functions/v2/scheduler');
 const {setGlobalOptions} = require('firebase-functions/v2');
 const {initializeApp} = require('firebase-admin/app');
+const {getAuth: getAdminAuth} = require('firebase-admin/auth');
 const {getFirestore, FieldValue} = require('firebase-admin/firestore');
 
 initializeApp();
@@ -257,7 +258,7 @@ exports.moderateProduct = onCall(async request => {
   const productId = cleanId(request.data && request.data.productId, 160);
   const decision = asText(request.data && request.data.decision, 20);
   const reason = asText(request.data && request.data.reason, 500);
-  if (!productId || !['approved','suspended'].includes(decision)) throw new HttpsError('invalid-argument', 'Invalid product decision.');
+  if (!productId || !['approved','rejected','suspended'].includes(decision)) throw new HttpsError('invalid-argument', 'Invalid product decision.');
   const ref = db.collection('products').doc(productId);
   const snap = await ref.get();
   if (!snap.exists) throw new HttpsError('not-found', 'Product not found.');
@@ -674,4 +675,196 @@ exports.getVetUnavailableSlots = onCall(async request => {
   const slots = await db.collection('vetAppointmentSlots')
     .where('vetId', '==', vetId).where('date', '==', date).get();
   return {unavailable: slots.docs.map(slot => asText(slot.data().time, 5)).filter(Boolean)};
+});
+
+
+/** Admin-only user directory. Never expose this endpoint to ordinary users. */
+exports.listAdminUsers = onCall(async request => {
+  requireAdmin(request);
+  const auth = getAdminAuth();
+  const listed = await auth.listUsers(1000);
+  const userRecords = listed.users;
+  const profileDocs = [];
+  for (let i = 0; i < userRecords.length; i += 300) {
+    const chunk = userRecords.slice(i, i + 300);
+    const docs = await db.getAll(...chunk.map(u => db.collection('users').doc(u.uid)));
+    profileDocs.push(...docs);
+  }
+  const profiles = new Map(profileDocs.filter(d => d.exists).map(d => [d.id, d.data()]));
+  return {
+    users: userRecords.map(user => {
+      const profile = profiles.get(user.uid) || {};
+      return {
+        uid:user.uid, email:asText(user.email,254), phoneNumber:asText(user.phoneNumber,40),
+        displayName:asText(profile.displayName || user.displayName || '',120),
+        role:asText(profile.role || (user.customClaims && user.customClaims.admin ? 'admin' : 'customer'),30),
+        adminStatus:asText(profile.adminStatus || (user.disabled ? 'suspended' : 'active'),30),
+        disabled:Boolean(user.disabled), emailVerified:Boolean(user.emailVerified),
+        createdAt:asText(user.metadata && user.metadata.creationTime,40),
+        lastSignInAt:asText(user.metadata && user.metadata.lastSignInTime,40)
+      };
+    }),
+    truncated:Boolean(listed.pageToken)
+  };
+});
+
+/** Admin-managed Auth state and password-reset link generation; never writes reset URLs to audit logs. */
+exports.manageUserAccount = onCall(async request => {
+  const actor = requireAdmin(request);
+  const uid = cleanId(request.data && request.data.uid, 160);
+  const action = asText(request.data && request.data.action, 30);
+  const reason = asText(request.data && request.data.reason, 500);
+  if (!uid || !['suspend','ban','reinstate','reset-password'].includes(action)) {
+    throw new HttpsError('invalid-argument','Choose a user and a valid account action.');
+  }
+  if (uid === actor.uid && ['suspend','ban'].includes(action)) {
+    throw new HttpsError('failed-precondition','You cannot suspend or ban the administrator account currently in use.');
+  }
+  const auth = getAdminAuth();
+  let result = {};
+  if (action === 'reset-password') {
+    const target = await auth.getUser(uid);
+    if (!target.email) throw new HttpsError('failed-precondition','This account has no email address for password reset. Phone OTP accounts must use phone authentication.');
+    const actionLink = await auth.generatePasswordResetLink(target.email);
+    result = {uid,action,actionLink,email:target.email};
+  } else {
+    const nextStatus = action === 'reinstate' ? 'active' : action === 'ban' ? 'banned' : 'suspended';
+    await auth.updateUser(uid,{disabled:nextStatus !== 'active'});
+    await db.collection('users').doc(uid).set({
+      adminStatus:nextStatus,
+      adminStatusReason:reason || null,
+      adminStatusBy:actor.uid,
+      adminStatusAt:FieldValue.serverTimestamp(),
+      updatedAt:FieldValue.serverTimestamp()
+    },{merge:true});
+    result = {uid,action,adminStatus:nextStatus};
+  }
+  await db.collection('auditLogs').add({
+    actorId:actor.uid,action:'user_'+action,targetId:uid,reason,
+    createdAt:FieldValue.serverTimestamp()
+  });
+  return result;
+});
+
+/** Create/update a category override. Defaults are in the client; Firestore holds edits and custom categories. */
+exports.saveAdminCategory = onCall(async request => {
+  const actor = requireAdmin(request);
+  const input = request.data || {};
+  const id = asText(input.id,60).toLowerCase();
+  const name = asText(input.name,80);
+  const short = asText(input.short || name,60);
+  const icon = asText(input.icon || '•',12);
+  const kicker = asText(input.kicker || name,80);
+  const description = asText(input.description,400);
+  const cardDescription = asText(input.cardDescription || description,180);
+  const image = asText(input.image,2048);
+  if (!/^[a-z0-9][a-z0-9-]{1,59}$/.test(id) || !name || !description) {
+    throw new HttpsError('invalid-argument','Use a valid category ID, name and description.');
+  }
+  if (image && !/^https:\\/\\//i.test(image)) throw new HttpsError('invalid-argument','Category image must be an HTTPS URL.');
+  const paletteIn = input.palette && typeof input.palette === 'object' ? input.palette : {};
+  const palette = {};
+  for (const key of ['accent','deep','wash','soft','warm','contrast']) {
+    const value = asText(paletteIn[key],16);
+    if (value && !/^#[0-9a-fA-F]{6}$/.test(value)) throw new HttpsError('invalid-argument','Category palette values must be six-digit hex colours.');
+    if (value) palette[key] = value;
+  }
+  const ref = db.collection('categories').doc(id);
+  const previous = await ref.get();
+  await ref.set({
+    id,name,short,icon,kicker,description,cardDescription,
+    image:image || (previous.exists ? asText(previous.data().image,2048) : ''),
+    ...(Object.keys(palette).length ? {palette} : {}),
+    createdAt:previous.exists ? previous.data().createdAt : FieldValue.serverTimestamp(),
+    updatedAt:FieldValue.serverTimestamp(),updatedBy:actor.uid
+  },{merge:true});
+  await db.collection('auditLogs').add({actorId:actor.uid,action:previous.exists?'category_updated':'category_created',targetId:id,createdAt:FieldValue.serverTimestamp()});
+  return {id,created:!previous.exists};
+});
+
+exports.deleteAdminCategory = onCall(async request => {
+  const actor = requireAdmin(request);
+  const id = cleanId(request.data && request.data.id,60);
+  if (!id) throw new HttpsError('invalid-argument','Category ID is required.');
+  const baseCategories = ['livestock','pets-supplies','meat','animal-products','animal-care'];
+  if (baseCategories.includes(id)) throw new HttpsError('failed-precondition','Built-in categories cannot be deleted; edit them or hide them by changing the site navigation instead.');
+  const usage = await db.collection('products').where('category','==',id).limit(1).get();
+  if (!usage.empty) throw new HttpsError('failed-precondition','This category is used by at least one listing. Reassign those listings before deleting it.');
+  await db.collection('categories').doc(id).delete();
+  await db.collection('auditLogs').add({actorId:actor.uid,action:'category_deleted',targetId:id,createdAt:FieldValue.serverTimestamp()});
+  return {id,deleted:true};
+});
+
+exports.saveAdminSiteSettings = onCall(async request => {
+  const actor = requireAdmin(request);
+  const input = request.data || {};
+  const announcementText = asText(input.announcementText,180);
+  const bannerTitle = asText(input.bannerTitle,140);
+  const bannerText = asText(input.bannerText,500);
+  const bannerImage = asText(input.bannerImage,2048);
+  const deliveryCharge = Number(input.deliveryCharge);
+  const commissionPercent = Number(input.commissionPercent);
+  const announcementEnabled = input.announcementEnabled === true;
+  if (!Number.isFinite(deliveryCharge) || deliveryCharge < 0 || deliveryCharge > 100000
+    || !Number.isFinite(commissionPercent) || commissionPercent < 0 || commissionPercent > 100) {
+    throw new HttpsError('invalid-argument','Delivery charge must be 0–100,000 NPR and commission must be 0–100%.');
+  }
+  if (bannerImage && !/^https:\\/\\//i.test(bannerImage)) throw new HttpsError('invalid-argument','Banner image must be an HTTPS URL.');
+  const data = {announcementText,bannerTitle,bannerText,bannerImage,announcementEnabled,deliveryCharge,commissionPercent,updatedBy:actor.uid,updatedAt:FieldValue.serverTimestamp()};
+  await db.collection('platformSettings').doc('public').set(data,{merge:true});
+  await db.collection('auditLogs').add({actorId:actor.uid,action:'site_settings_updated',targetId:'public',reason:'deliveryCharge='+deliveryCharge+'; commissionPercent='+commissionPercent,createdAt:FieldValue.serverTimestamp()});
+  return {saved:true,settings:data};
+});
+
+/** Admin product CRUD. New admin-created listings remain pending until explicitly approved. */
+exports.saveAdminProduct = onCall(async request => {
+  const actor = requireAdmin(request);
+  const input = request.data || {};
+  const productId = cleanId(input.productId,160);
+  const name = asText(input.name,120);
+  const description = asText(input.description,2500);
+  const category = asText(input.category,80);
+  const condition = asText(input.condition || 'New',80);
+  const unit = asText(input.unit || 'item',30);
+  const location = asText(input.location || 'Nepal',220);
+  const imageUrl = asText(input.image,2048);
+  const price = Number(input.price);
+  const stock = Number(input.stock);
+  const retailerId = cleanId(input.retailerId,160);
+  if (!name || !description || !category || !imageUrl || !retailerId
+    || !/^https:\\/\\//i.test(imageUrl) || !Number.isFinite(price) || price <= 0 || price > 100000000
+    || !Number.isFinite(stock) || stock < 0 || stock > 1000000
+    || (!['kg','litre'].includes(unit.toLowerCase()) && !Number.isInteger(stock))
+    || (['kg','litre'].includes(unit.toLowerCase()) && Math.abs(stock*2-Math.round(stock*2)) > 0.00001)) {
+    throw new HttpsError('invalid-argument','Complete valid product name, description, category, HTTPS image, price, stock, unit and retailer.');
+  }
+  const [categorySnap,retailerSnap] = await Promise.all([
+    db.collection('categories').doc(category).get(),
+    db.collection('retailers').doc(retailerId).get()
+  ]);
+  // A category may be a built-in category that has not needed a Firestore override yet.
+  const builtin = ['livestock','pets-supplies','meat','animal-products','animal-care'].includes(category);
+  if (!categorySnap.exists && !builtin) throw new HttpsError('failed-precondition','Choose an existing category.');
+  if (!retailerSnap.exists || retailerSnap.data().status !== 'approved') throw new HttpsError('failed-precondition','Choose an approved retailer.');
+  const ref = productId ? db.collection('products').doc(productId) : db.collection('products').doc();
+  const current = productId ? await ref.get() : null;
+  if (productId && !current.exists) throw new HttpsError('not-found','Product not found.');
+  const previous = current && current.exists ? current.data() : {};
+  if (previous.retailerId && previous.retailerId !== retailerId) throw new HttpsError('failed-precondition','Product ownership cannot be changed from this form.');
+  const images = Array.isArray(previous.images) && previous.images.length ? previous.images : [imageUrl];
+  const data = {
+    name,description,category,condition,price,unit,stock,location,
+    image:imageUrl,images:images.map((src,i)=>i===0?imageUrl:asText(src,2048)).slice(0,5),
+    videoUrls:Array.isArray(previous.videoUrls)?previous.videoUrls:[],
+    attributes:previous.attributes && typeof previous.attributes === 'object' ? previous.attributes : {},
+    retailer:asText(retailerSnap.data().storeName || 'Verified retailer',160),retailerId,
+    status:productId ? previous.status : 'pending',
+    createdAt:productId ? (previous.createdAt || FieldValue.serverTimestamp()) : FieldValue.serverTimestamp(),
+    updatedAt:FieldValue.serverTimestamp(),
+    adminEditedBy:actor.uid
+  };
+  if (!productId) data.images = [imageUrl];
+  await ref.set(data,{merge:false});
+  await db.collection('auditLogs').add({actorId:actor.uid,action:productId?'product_edited':'product_created',targetId:ref.id,productName:name,createdAt:FieldValue.serverTimestamp()});
+  return {productId:ref.id,status:data.status,created:!productId};
 });
