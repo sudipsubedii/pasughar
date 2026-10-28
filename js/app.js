@@ -291,7 +291,15 @@ function renderPetSection(params) {
     accessories:{title:'Pet accessories',eyebrow:'Comfort, play and care',desc:'Find collars, leads, beds, toys, carriers, grooming tools and other accessories.',empty:'No accessories listed yet. Retailers can select Pet accessories when creating a listing.'},
     breeding:{title:'Pet breeding bookings',eyebrow:'Find a dog by location',desc:'Browse dogs offered for responsible breeding. Check breed, age, health screening and location. A date is confirmed only after the owner accepts the request.',empty:'No breeding listings yet. Retailers can add a dog and choose Pet breeding.'}
   }[type];
-  const items = activeProducts().filter(p => p.category === 'pets-supplies' && ((p.attributes && p.attributes.petSection) || 'pets') === type);
+  const petSectionOf = p => {
+    const raw = p.attributes?.petSection || p.petSection || p.attributes?.pet_section || 'pets';
+    const value = String(raw).toLowerCase().trim().replace(/[ _]+/g,'-');
+    if (['pet','pets','pet-sale','pets-for-sale','for-sale'].includes(value)) return 'pets';
+    if (['accessory','accessories','pet-accessories','supplies','pet-supplies'].includes(value)) return 'accessories';
+    if (['breeding','pet-breeding','breeding-booking','breeding-bookings'].includes(value)) return 'breeding';
+    return value;
+  };
+  const items = activeProducts().filter(p => normalizeCategoryId(p.category) === 'pets-supplies' && petSectionOf(p) === type);
   const cards = items.map(p => type === 'breeding'
     ? '<article class="product-card pet-breeding-card"><div class="product-image-wrap"><a href="'+publicProductUrl(p)+'"><img class="product-image" src="'+safe(p.image||'')+'" alt="'+safe(p.name)+'" loading="lazy"></a><span class="product-badge">'+safe(p.location||'Location not set')+'</span></div><div class="product-content"><div class="product-store">'+safe(p.retailer||'Verified retailer')+'</div><a href="'+publicProductUrl(p)+'"><h3 class="product-title">'+safe(p.name)+'</h3></a><div class="product-meta"><span>'+safe(p.location||'Nepal')+'</span><span>'+safe((p.attributes && p.attributes.breed)||'Breed details on listing')+'</span></div><p class="small-muted">Fee / arrangement: '+money(p.price)+'</p><div class="pet-breeding-actions"><a class="button button-secondary button-wide" href="'+publicProductUrl(p)+'">View dog</a><button class="button button-primary button-wide" type="button" data-action="book-breeding" data-id="'+safe(p.id)+'">Request a date</button></div></div></article>'
     : productCard(p)).join('');
