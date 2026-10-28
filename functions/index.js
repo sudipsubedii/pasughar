@@ -650,3 +650,28 @@ exports.updateVetAppointmentStatus = onCall(async request => {
   });
   return {appointmentId,status};
 });
+
+
+exports.getVetUnavailableSlots = onCall(async request => {
+  requireAuth(request);
+  const vetId = cleanId(request.data && request.data.vetId, 160);
+  const date = asText(request.data && request.data.date, 10);
+  if (!vetId || !/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) {
+    throw new HttpsError('invalid-argument', 'Choose a veterinary clinic and a valid date.');
+  }
+  const [year, month, day] = date.split('-').map(Number);
+  const daysInMonth = month >= 1 && month <= 12 ? new Date(Date.UTC(year, month, 0)).getUTCDate() : 0;
+  if (!daysInMonth || day < 1 || day > daysInMonth) throw new HttpsError('invalid-argument', 'Choose a real calendar date.');
+  const todayNepal = new Date(Date.now() + (5 * 60 + 45) * 60 * 1000).toISOString().slice(0, 10);
+  if (date < todayNepal) throw new HttpsError('failed-precondition', 'Choose today or a future date.');
+  const [storeSnap, retailerSnap] = await Promise.all([
+    db.collection('publicStores').doc(vetId).get(),
+    db.collection('retailers').doc(vetId).get()
+  ]);
+  if (!storeSnap.exists || storeSnap.data().isVet !== true || !retailerSnap.exists || retailerSnap.data().status !== 'approved') {
+    throw new HttpsError('failed-precondition', 'This veterinary clinic is not available for appointments.');
+  }
+  const slots = await db.collection('vetAppointmentSlots')
+    .where('vetId', '==', vetId).where('date', '==', date).get();
+  return {unavailable: slots.docs.map(slot => asText(slot.data().time, 5)).filter(Boolean)};
+});
