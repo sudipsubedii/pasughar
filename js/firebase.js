@@ -83,15 +83,15 @@ export const createEmailAccount = async (email, password, role = 'customer', rem
   await setRememberMe(rememberMe);
   const credential = await createUserWithEmailAndPassword(auth, email.trim(), password);
   await ensureUserProfile(credential.user, role);
-  await sendEmailVerification(credential.user);
+  await sendEmailVerification(credential.user, {url:'https://pashughar.pages.dev/#account', handleCodeInApp:false});
   return credential;
 };
-export const resetEmailPassword = email => sendPasswordResetEmail(auth, email.trim());
+export const resetEmailPassword = email => sendPasswordResetEmail(auth, email.trim(), {url:'https://pashughar.pages.dev/#login', handleCodeInApp:false});
 export const sendVerificationEmail = async () => {
   if (!auth.currentUser) throw new Error('Sign in first to verify your email.');
   if (!auth.currentUser.email) throw new Error('This account has no email address to verify.');
   if (auth.currentUser.emailVerified) return false;
-  await sendEmailVerification(auth.currentUser);
+  await sendEmailVerification(auth.currentUser, {url:'https://pashughar.pages.dev/#account', handleCodeInApp:false});
   return true;
 };
 export const refreshAuthUser = async () => {
