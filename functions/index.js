@@ -788,7 +788,7 @@ exports.saveAdminCategory = onCall(async request => {
     image:image || (previous.exists ? asText(previous.data().image,2048) : ''),
     ...(Object.keys(palette).length ? {palette} : {}),
     createdAt:previous.exists ? previous.data().createdAt : FieldValue.serverTimestamp(),
-    updatedAt:FieldValue.serverTimestamp(),updatedBy:actor.uid
+    updatedAt:FieldValue.serverTimestamp()
   },{merge:true});
   await db.collection('auditLogs').add({actorId:actor.uid,action:previous.exists?'category_updated':'category_created',targetId:id,createdAt:FieldValue.serverTimestamp()});
   return {id,created:!previous.exists};
@@ -820,7 +820,7 @@ exports.saveAdminSiteSettings = onCall(async request => {
     throw new HttpsError('invalid-argument','Delivery charge must be 0–100,000 NPR and commission must be 0–100%.');
   }
   if (bannerImage && !/^https:\/\//i.test(bannerImage)) throw new HttpsError('invalid-argument','Banner image must be an HTTPS URL.');
-  const data = {announcementText,bannerTitle,bannerText,bannerImage,announcementEnabled,deliveryCharge,commissionPercent,updatedBy:actor.uid,updatedAt:FieldValue.serverTimestamp()};
+  const data = {announcementText,bannerTitle,bannerText,bannerImage,announcementEnabled,deliveryCharge,commissionPercent};
   await db.collection('platformSettings').doc('public').set(data,{merge:true});
   await db.collection('auditLogs').add({actorId:actor.uid,action:'site_settings_updated',targetId:'public',reason:'deliveryCharge='+deliveryCharge+'; commissionPercent='+commissionPercent,createdAt:FieldValue.serverTimestamp()});
   return {saved:true,settings:{announcementText,bannerTitle,bannerText,bannerImage,announcementEnabled,deliveryCharge,commissionPercent}};
@@ -855,6 +855,7 @@ exports.saveAdminProduct = onCall(async request => {
   // A category may be a built-in category that has not needed a Firestore override yet.
   const builtin = ['livestock','pets-supplies','meat','animal-products','animal-care'].includes(category);
   if (!categorySnap.exists && !builtin) throw new HttpsError('failed-precondition','Choose an existing category.');
+  if (categorySnap.exists && categorySnap.data().active === false) throw new HttpsError('failed-precondition','This category is hidden. Restore it before assigning products to it.');
   if (!retailerSnap.exists || retailerSnap.data().status !== 'approved') throw new HttpsError('failed-precondition','Choose an approved retailer.');
   const ref = productId ? db.collection('products').doc(productId) : db.collection('products').doc();
   const current = productId ? await ref.get() : null;
@@ -871,7 +872,6 @@ exports.saveAdminProduct = onCall(async request => {
     status:productId ? previous.status : 'pending',
     createdAt:productId ? (previous.createdAt || FieldValue.serverTimestamp()) : FieldValue.serverTimestamp(),
     updatedAt:FieldValue.serverTimestamp(),
-    adminEditedBy:actor.uid
   };
   if (!productId) data.images = [imageUrl];
   await ref.set(data,{merge:false});
