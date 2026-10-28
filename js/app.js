@@ -1540,6 +1540,12 @@ window.addEventListener('pashughar:cloud-error', event => {
   if(!notice){notice=document.createElement('div');notice.id='cloud-error-retry';notice.className='cloud-error-banner';notice.setAttribute('role','alert');notice.innerHTML='<strong>Some live data could not be loaded.</strong><span>Check your connection or Firebase permissions, then retry.</span><button type="button" class="button button-secondary" data-action="retry-app">Retry</button>';app.prepend(notice);}
 });
 ['pointerdown','keydown','touchstart','mousemove'].forEach(type=>document.addEventListener(type,()=>{if(session())resetAutoLogoutTimer();},{passive:true}));
+window.addEventListener('pashughar:wishlist-cloud-loaded', event => {
+  const detail=event.detail||{};
+  if(!detail.uid || session()?.uid!==detail.uid || !Array.isArray(detail.productIds))return;
+  store.saveWishlist(detail.productIds);
+  if(getRoute().path==='wishlist')renderWishlist();
+});
 window.addEventListener('pashughar:cloud-updated', event => {
   if(event.detail?.name==='products')catalogueLoaded=true;
   if(getRoute().path==='cart'&&document.getElementById('checkout-form')){updateCartCount();return;}
