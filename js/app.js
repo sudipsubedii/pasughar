@@ -766,10 +766,10 @@ function closeModal() {
   if(wasOpen && modalHistoryActive) { modalHistoryActive=false; history.back(); }
 }
 function submitProduct(form){
-  const data=new FormData(form);const name=String(data.get('name')||'').trim();const desc=String(data.get('description')||'').trim();const price=Number(data.get('price'));const stock=Number(data.get('stock'));
+  const data=new FormData(form);const name=String(data.get('name')||'').trim();const desc=String(data.get('description')||'').trim();const price=Number(data.get('price'));const stock=Number(data.get('stock'));const unit=String(data.get('unit')||'');const allowsFraction=['kg','litre'].includes(unit.toLowerCase());
   const user=session();const profile=retailerProfile(user);if(!user||user.role!=='retailer'||!profile||profile.status!=='approved')return showToast('Only verified retailers can publish products.','error');
   if(isFirebaseConfigured()&&!isVerifiedContact({emailVerified:user.emailVerified,phoneNumber:user.phoneNumber})){showToast('Verify your email or phone before publishing listings.','warn');navigate('#account');return;}
-  if(!name||name.length>120||!desc||desc.length>2500||!Number.isFinite(price)||price<=0||price>100000000||!Number.isInteger(stock)||stock<0||stock>1000000)return showToast('Check the product name, description, price and whole-number stock limits.','error');
+  if(!name||name.length>120||!desc||desc.length>2500||!Number.isFinite(price)||price<=0||price>100000000||!Number.isFinite(stock)||(allowsFraction?Math.abs(stock*2-Math.round(stock*2))>0.00001:!Number.isInteger(stock))||stock<0||stock>1000000)return showToast('Check the product name, description, price and whole-number stock limits.','error');
   const products=allProducts();const id=form.dataset.id;const existing=id?products.find(p=>p.id===id):null;
   if(existing&&!(existing.retailerId===user.uid||(user.uid==='demo-retailer'&&existing.retailerId==='retailer-demo')))return showToast('You can only edit your own listings.','error');
   const attrs={...(existing?.attributes||{})};
@@ -787,7 +787,7 @@ function submitProduct(form){
   const preservedImages=!isFirebaseConfigured()&&existing&&Array.isArray(existing.images)?existing.images.filter(x=>String(x).startsWith('data:')):[];
   const images=[...new Set([...urlImages,...localImages,...preservedImages])].slice(0,5);
   const primary=images[0]||existing?.image||'https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=700&q=80';
-  const entry={...(existing||{}),id:id||slugId(),name,category:normalizeCategoryId(String(data.get('category'))),condition:String(data.get('condition')||'New'),description:desc,price,unit:String(data.get('unit')),stock,location:String(data.get('location')||'Nepal').trim(),image:primary,images:images.length?images:[primary],videoUrls,attributes:attrs,retailer:profile.storeName,retailerId:user.uid,status:existing?.status==='paused'?'paused':'approved',createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
+  const entry={...(existing||{}),id:id||slugId(),name,category:normalizeCategoryId(String(data.get('category'))),condition:String(data.get('condition')||'New'),description:desc,price,unit,stock,location:String(data.get('location')||'Nepal').trim(),image:primary,images:images.length?images:[primary],videoUrls,attributes:attrs,retailer:profile.storeName,retailerId:user.uid,status:existing?.status==='paused'?'paused':'approved',createdAt:existing?.createdAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
   const saveResult = store.saveProducts(existing?products.map(p=>p.id===id?entry:p):[entry,...products]);
   if (isFirebaseConfigured()) {
     showToast('Saving product to Firestore…');
