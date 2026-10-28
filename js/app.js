@@ -681,6 +681,130 @@ function renderAccount() {
     : '<div class="notice notice-warn"><strong>Contact verification needed.</strong> Verify your email or use phone OTP before publishing listings or placing an account-based order.</div>'+(user.email?'<button class="button button-primary" type="button" data-action="send-email-verification">Send verification email</button> ':'')+'<button class="button button-secondary" type="button" data-action="refresh-verification">I have verified — refresh status</button>';
   app.innerHTML = '<div class="page-wrap"><div class="container"><div class="account-page-card"><a class="button button-secondary" href="#home">← Back to shopping</a><div class="eyebrow">My Pashughar</div><h1>My Account</h1><p class="account-user-name">'+safe(user.name||'Pashughar user')+'</p><p class="small-muted">'+safe(user.email||user.phoneNumber||'')+' · '+roleName+'</p>'+verifyBlock+'<div class="account-actions"><a class="button button-primary" href="'+destination+'">'+(user.role==='admin'?'Open admin dashboard':user.role==='retailer'?'Open retailer dashboard':'Continue shopping')+' →</a><button class="button button-secondary" type="button" data-action="signout">Sign out</button></div><p class="small-muted">Remember me is controlled when you sign in. Unchecked sessions end when the browser session closes. Inactive sessions are signed out automatically.</p></div></div></div>';
 }
+
+function customerPageGuard(pageTitle) {
+  const user=session();
+  if (!user) { app.innerHTML='<div class="page-wrap"><div class="container">'+emptyState('♙','Sign in to continue','Sign in to view your personal Pashughar information.','#login','Sign in')+'</div></div>'; return false; }
+  if (user.role !== 'customer') { app.innerHTML='<div class="page-wrap"><div class="container">'+emptyState('♙','Customer account required','This page is available from a customer account.','#account','Open my account')+'</div></div>'; return false; }
+  return true;
+}
+function formatCustomerDate(value) {
+  if (!value) return 'Date not available';
+  const date=new Date(value);
+  return Number.isFinite(date.getTime())?date.toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}):String(value);
+}
+function renderCustomerOrders() {
+  if(!customerPageGuard('My orders'))return;
+  const user=session();
+  const orders=store.orders().filter(o=>o.customerId===user.uid || (o.demo && o.customerEmail===user.email) || (o.customerUid===user.uid));
+  if(!orders.length) {
+    app.innerHTML='<div class="page-wrap"><div class="container"><div class="page-title-row"><div><div class="eyebrow">Your purchases</div><h1>My orders</h1><p>Track orders and review receipts from your Pashughar account.</p></div></div>'+emptyState('▤','No orders yet','When you place an order, its status and items will appear here.','#shop','Explore products')+'</div></div>';
+    return;
+  }
+  const stageIndex=status=>({Pending:0,Confirmed:1,Processing:1,Shipped:2,'Out for delivery':2,Delivered:3}[status]??-1);
+  const cards=orders.slice().sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0)).map(order=>{
+    const orderId=order.orderId||order.id;
+    const status=String(order.status||'Pending');
+    const terminal=['Rejected','Cancelled'].includes(status);
+    const current=stageIndex(status);
+    const timeline=terminal?'<p class="order-terminal-status">'+safe(status)+'. Contact support or the retailer if you need help.</p>':'<ol class="order-tracking-steps">'+[['Placed',0],['Confirmed',1],['Out for delivery',2],['Delivered',3]].map(([label,index])=>'<li class="'+(current>=index?'complete':'')+'"><span></span><small>'+label+'</small></li>').join('')+'</ol>';
+    const items=(order.items||[]).map(item=>{
+      const p=getProduct(item.productId||item.id);
+      const name=item.name||p?.name||'Product';
+      const qty=Number(item.quantity??item.qty??0);
+      const price=Number(item.unitPrice??item.price??p?.price??0);
+      return '<li>'+safe(name)+' <span>'+qty+' '+safe(item.unit||p?.unit||'unit')+' · '+money(price*qty)+'</span></li>';
+    }).join('');
+    const ship=order.shipping||{};
+    return '<article class="customer-order-card"><div class="customer-order-heading"><div><span class="eyebrow">Order</span><h2>'+safe(orderId)+'</h2><p class="small-muted">Placed '+safe(formatCustomerDate(order.createdAt))+'</p></div><span class="status-pill '+(terminal?'status-inactive':status==='Delivered'?'':'status-pending')+'">'+safe(status)+'</span></div>'+timeline+'<div class="customer-order-grid"><div><h3>Items</h3><ul class="customer-order-items">'+items+'</ul></div><div><h3>Delivery</h3><p>'+safe(ship.name||order.customerName||user.name||'')+'<br>'+safe(ship.address||order.address||'')+'<br>'+safe([ship.municipality,ship.district,ship.province,ship.city||order.city].filter(Boolean).join(', '))+'<br>'+safe(ship.phone||order.phone||'')+'</p>'+(ship.deliverySlot?'<p class="small-muted">Requested window: '+safe(ship.deliverySlot)+'</p>':'')+'</div></div><div class="customer-order-total"><span>Order total</span><strong>'+money(order.total??order.subtotal??0)+'</strong></div><div class="inline-actions"><button class="button button-secondary button-small" type="button" data-action="download-order-invoice" data-order-id="'+safe(orderId)+'">Download receipt</button><a class="button button-secondary button-small" href="#enquiries">View enquiries</a></div></article>';
+  }).join('');
+  app.innerHTML='<div class="page-wrap"><div class="container"><div class="page-title-row"><div><div class="eyebrow">Your purchases</div><h1>My orders</h1><p>'+orders.length+' order(s) on this account.</p></div><a class="button button-secondary" href="#shop">Continue shopping</a></div>'+cards+'</div></div>';
+}
+function renderConversationMessages(enquiry) {
+  const initial={senderRole:'customer',senderUid:enquiry.customerUid||'',body:enquiry.message||'',createdAt:enquiry.createdAt,legacy:true};
+  const messages=[initial,...(Array.isArray(enquiry.messages)?enquiry.messages:[])].filter(m=>m.body);
+  return '<div class="conversation-messages">'+messages.map(message=>'<div class="conversation-message '+(message.senderRole==='customer'?'from-customer':'from-seller')+'"><div class="conversation-message-role">'+(message.senderRole==='retailer'?'Seller':'You')+'</div><p>'+safe(message.body)+'</p><small>'+safe(formatCustomerDate(message.createdAt))+'</small></div>').join('')+'</div>';
+}
+function renderCustomerEnquiries() {
+  if(!customerPageGuard('My enquiries'))return;
+  const user=session();
+  const enquiries=store.enquiries().filter(e=>e.customerUid===user.uid || (e.customerEmail&&e.customerEmail===user.email));
+  if(!enquiries.length) {
+    app.innerHTML='<div class="page-wrap"><div class="container"><div class="page-title-row"><div><div class="eyebrow">Customer messages</div><h1>My enquiries</h1><p>See retailer replies and continue conversations about listings.</p></div></div>'+emptyState('✉','No enquiries yet','Open a product listing and select Ask retailer a question to start a conversation.','#shop','Browse listings')+'</div></div>';
+    return;
+  }
+  const cards=enquiries.slice().sort((a,b)=>new Date(b.updatedAt||b.createdAt||0)-new Date(a.updatedAt||a.createdAt||0)).map(enquiry=>'<article class="customer-enquiry-card"><div class="customer-order-heading"><div><span class="eyebrow">Listing enquiry</span><h2>'+safe(enquiry.productName||'Product question')+'</h2><p class="small-muted">Started '+safe(formatCustomerDate(enquiry.createdAt))+'</p></div><span class="status-pill '+(enquiry.status==='replied'?'':'status-pending')+'">'+safe(enquiry.status||'open')+'</span></div><p class="small-muted">Retailer: '+safe(enquiry.retailerName||'Assigned retailer')+'</p>'+renderConversationMessages(enquiry)+'<form class="customer-message-form" data-enquiry-id="'+safe(enquiry.id)+'"><div class="field"><label for="customer-message-'+safe(enquiry.id)+'">Send a message</label><textarea id="customer-message-'+safe(enquiry.id)+'" name="message" required minlength="2" maxlength="1500" placeholder="Write your reply or follow-up question"></textarea></div><button class="button button-primary button-small" type="submit">Send message</button></form><a class="button button-secondary button-small" href="'+publicProductUrl(getProduct(enquiry.productId)||{id:enquiry.productId})+'">View listing</a></article>').join('');
+  app.innerHTML='<div class="page-wrap"><div class="container"><div class="page-title-row"><div><div class="eyebrow">Customer messages</div><h1>My enquiries</h1><p>'+enquiries.length+' conversation(s).</p></div></div>'+cards+'</div></div>';
+}
+function renderCustomerNotifications() {
+  if(!customerPageGuard('Notifications'))return;
+  const user=session();
+  const notifications=store.notifications().slice().sort((a,b)=>new Date(b.createdAt||0)-new Date(a.createdAt||0));
+  if(!notifications.length) {
+    app.innerHTML='<div class="page-wrap"><div class="container"><div class="page-title-row"><div><div class="eyebrow">Updates</div><h1>Notifications</h1><p>Order updates, saved-item price drops, restocks and appointment reminders appear here.</p></div></div>'+emptyState('♧','You are all caught up','There are no notifications for this account yet.','#shop','Explore marketplace')+'</div></div>';
+    return;
+  }
+  const rows=notifications.map(n=>{
+    const action=n.type==='order'?'#orders':n.type==='appointment'||n.type==='appointment-reminder'?'#appointments':(n.type==='price-drop'||n.type==='restock')&&n.relatedId?'#product/'+encodeURIComponent(n.relatedId):'#notifications';
+    return '<article class="notification-card '+(n.read?'is-read':'is-unread')+'"><div class="notification-icon">'+(n.type==='order'?'▤':n.type==='price-drop'?'₨':n.type==='restock'?'✓':n.type?.startsWith('appointment')?'◷':'•')+'</div><div class="notification-copy"><div class="notification-heading"><strong>'+safe(n.title||'Pashughar update')+'</strong>'+(n.read?'':'<span class="notification-unread-dot" aria-label="Unread"></span>')+'</div><p>'+safe(n.body||'You have a new update.')+'</p><small>'+safe(formatCustomerDate(n.createdAt))+'</small><div class="inline-actions"><button type="button" class="button button-secondary button-small" data-action="open-notification" data-notification-id="'+safe(n.id)+'" data-target="'+safe(action)+'">Open</button>'+(n.read?'':'<button type="button" class="button button-secondary button-small" data-action="mark-notification-read" data-id="'+safe(n.id)+'">Mark read</button>')+'</div></div></article>';
+  }).join('');
+  app.innerHTML='<div class="page-wrap"><div class="container"><div class="page-title-row"><div><div class="eyebrow">Updates</div><h1>Notifications</h1><p>'+notifications.filter(n=>!n.read).length+' unread notification(s).</p></div></div><div class="notification-list">'+rows+'</div></div></div>';
+}
+function renderVeterinaryProviders() {
+  app.innerHTML='<div class="page-wrap"><div class="container"><div class="page-title-row"><div><div class="eyebrow">Animal healthcare</div><h1>Book a vet appointment</h1><p>Choose a verified veterinary provider and request one of their published appointment times.</p></div><a class="button button-secondary" href="#appointments">My appointments</a></div><div class="initial-loading">Loading veterinary providers…</div></div></div>';
+  getVeterinaryProviders().then(providers=>{
+    veterinaryProvidersCache=providers;
+    if(getRoute().path!=='vets')return;
+    const vets=providers.filter(p=>p.isVet===true);
+    const cards=vets.map(v=>{
+      const slots=Array.isArray(v.vetAppointmentSlots)?v.vetAppointmentSlots:[];
+      return '<article class="vet-provider-card"><div class="vet-provider-avatar">✚</div><div class="vet-provider-main"><div class="eyebrow">Veterinary provider</div><h2>'+safe(v.storeName||'Veterinary clinic')+'</h2><p>'+safe(v.description||'Veterinary services from a Pashughar retailer.')+'</p><div class="public-store-facts"><span>⌖ '+safe(v.location||'Location not specified')+'</span>'+(v.publicPhone?'<a href="tel:'+safe(v.publicPhone)+'">☎ '+safe(v.publicPhone)+'</a>':'')+'</div><p class="small-muted">Specialties: '+safe((v.vetSpecialties||[]).join(', ')||'Contact the clinic')+'</p><p class="small-muted">Consultation fee: '+(Number(v.consultationFee)>0?money(v.consultationFee):'Contact provider')+'</p><div class="vet-slot-chips">'+(slots.length?slots.map(slot=>'<span class="vet-slot-chip">'+safe(slot)+'</span>').join(''):'<span class="small-muted">No bookable time slots published yet.</span>')+'</div><button class="button button-primary" type="button" data-action="book-vet-appointment" data-store-id="'+safe(v.id)+'" '+(!slots.length?'disabled':'')+'>Choose date and time →</button></div></article>';
+    }).join('');
+    const container='<div class="page-wrap"><div class="container"><div class="page-title-row"><div><div class="eyebrow">Animal healthcare</div><h1>Book a vet appointment</h1><p>Choose a verified veterinary provider and request one of their published appointment times.</p></div><a class="button button-secondary" href="#appointments">My appointments</a></div>'+(cards?'<div class="vet-provider-list">'+cards+'</div>':emptyState('✚','No appointment-ready vets yet','Verified veterinary retailers can add appointment slots in their store profile.','#shop','Browse animal care'))+'</div></div>';
+    app.innerHTML=container;
+  }).catch(error=>{
+    app.innerHTML='<div class="page-wrap"><div class="container">'+emptyState('!','Could not load veterinary providers','Check your connection and try again.','#vets','Retry')+'</div></div>';
+    showToast(firebaseErrorMessage(error),'error');
+  });
+}
+function openVetAppointmentForm(storeId) {
+  const user=session();
+  if(!user){showToast('Sign in before booking a veterinary appointment.','warn');navigate('#login');return;}
+  if(!isVerifiedContact({emailVerified:user.emailVerified,phoneNumber:user.phoneNumber})){showToast('Verify your email or phone before booking.','warn');navigate('#account');return;}
+  getPublicStoreProfile(storeId).then(provider=>{
+    if(!provider||!provider.isVet)return showToast('This veterinary provider is no longer available.','error');
+    const slots=Array.isArray(provider.vetAppointmentSlots)?provider.vetAppointmentSlots:[];
+    if(!slots.length)return showToast('This provider has not published appointment slots yet.','warn');
+    const today=new Date();const minDate=[today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-');
+    modalContent.innerHTML='<div class="modal-inner"><div class="modal-head"><div><div class="eyebrow">Veterinary appointment</div><h2>Book with '+safe(provider.storeName||'Veterinary provider')+'</h2><p>'+safe(provider.location||'')+'</p></div><button class="modal-close" data-action="close-modal" aria-label="Close">×</button></div><form id="vet-booking-form" data-store-id="'+safe(storeId)+'"><div class="field-grid"><div class="field"><label for="vet-customer-name">Your name *</label><input id="vet-customer-name" name="customerName" required maxlength="120" value="'+safe(user.name||'')+'"></div><div class="field"><label for="vet-customer-phone">Nepali mobile number *</label><input id="vet-customer-phone" name="customerPhone" required inputmode="tel" maxlength="20" value="'+safe(user.phoneNumber||'')+'" placeholder="98XXXXXXXX"></div></div><div class="field"><label for="vet-pet-name">Animal name / identifier</label><input id="vet-pet-name" name="petName" maxlength="100" placeholder="Optional"></div><div class="field"><label for="vet-appointment-date">Appointment date *</label><input id="vet-appointment-date" name="appointmentDate" type="date" min="'+minDate+'" required></div><div class="field"><label for="vet-appointment-slot">Available time (Nepal time) *</label><select id="vet-appointment-slot" name="slot" required>'+slots.map(slot=>'<option value="'+safe(slot)+'">'+safe(slot)+'</option>').join('')+'</select></div><div class="field"><label for="vet-appointment-reason">Reason for visit *</label><textarea id="vet-appointment-reason" name="reason" required minlength="2" maxlength="1000" placeholder="Symptoms, vaccination, routine check-up…"></textarea></div><div class="notice notice-info">The slot is reserved when the booking succeeds. A confirmation and reminders will be available in My appointments and Notifications.</div><div class="modal-actions"><button type="button" class="button button-secondary" data-action="close-modal">Cancel</button><button type="submit" class="button button-primary">Confirm appointment →</button></div></form></div>';
+    showModalWithHistory();
+  }).catch(error=>showToast(firebaseErrorMessage(error),'error'));
+}
+function renderCustomerAppointments() {
+  if(!customerPageGuard('My appointments'))return;
+  const user=session();
+  const items=store.vetAppointments().filter(a=>a.customerUid===user.uid).slice().sort((a,b)=>(String(a.appointmentDate)+String(a.slot)).localeCompare(String(b.appointmentDate)+String(b.slot)));
+  if(!items.length) {
+    app.innerHTML='<div class="page-wrap"><div class="container"><div class="page-title-row"><div><div class="eyebrow">Animal healthcare</div><h1>My appointments</h1><p>Manage your veterinary appointments, cancellations and rescheduling.</p></div></div>'+emptyState('◷','No appointments booked','Find a veterinary provider and reserve an available time slot.','#vets','Find a veterinarian')+'</div></div>';
+    return;
+  }
+  const cards=items.map(a=>{
+    const canChange=['confirmed','reschedule-requested'].includes(a.status);
+    return '<article class="vet-appointment-card"><div class="customer-order-heading"><div><div class="eyebrow">Veterinary appointment</div><h2>'+safe(a.storeName||'Veterinary provider')+'</h2><p class="small-muted">'+safe(a.appointmentDate)+' · '+safe(a.slot)+' (Nepal time)</p></div><span class="status-pill '+(['cancelled','completed'].includes(a.status)?'': 'status-pending')+'">'+safe(a.status)+'</span></div><p><strong>Animal:</strong> '+safe(a.petName||'Not specified')+'<br><strong>Reason:</strong> '+safe(a.reason||'Not specified')+'</p><div class="inline-actions"><a class="button button-secondary button-small" href="#notifications">View reminders</a>'+(canChange?'<button class="button button-secondary button-small" data-action="reschedule-vet-appointment" data-id="'+safe(a.id)+'">Reschedule</button><button class="button button-secondary button-small" data-action="cancel-vet-appointment" data-id="'+safe(a.id)+'">Cancel appointment</button>':'')+'</div></article>';
+  }).join('');
+  app.innerHTML='<div class="page-wrap"><div class="container"><div class="page-title-row"><div><div class="eyebrow">Animal healthcare</div><h1>My appointments</h1><p>'+items.length+' appointment(s).</p></div><a class="button button-primary" href="#vets">Book another vet</a></div>'+cards+'</div></div>';
+}
+function openVetRescheduleForm(appointmentId) {
+  const appointment=store.vetAppointments().find(a=>a.id===appointmentId);
+  if(!appointment)return showToast('Appointment not found. Refresh and retry.','warn');
+  getPublicStoreProfile(appointment.storeId).then(provider=>{
+    const slots=Array.isArray(provider?.vetAppointmentSlots)?provider.vetAppointmentSlots:[];
+    if(!slots.length)return showToast('The provider has not published bookable slots. Contact the clinic.','warn');
+    const today=new Date();const minDate=[today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-');
+    modalContent.innerHTML='<div class="modal-inner"><div class="modal-head"><div><div class="eyebrow">Change appointment</div><h2>Reschedule appointment</h2><p>'+safe(provider.storeName||appointment.storeName||'Veterinary provider')+'</p></div><button class="modal-close" data-action="close-modal" aria-label="Close">×</button></div><form id="vet-reschedule-form" data-appointment-id="'+safe(appointmentId)+'"><div class="field"><label for="reschedule-date">New date *</label><input id="reschedule-date" name="appointmentDate" type="date" min="'+minDate+'" value="'+safe(appointment.appointmentDate)+'" required></div><div class="field"><label for="reschedule-slot">New time *</label><select id="reschedule-slot" name="slot" required>'+slots.map(slot=>'<option value="'+safe(slot)+'" '+(slot===appointment.slot?'selected':'')+'>'+safe(slot)+'</option>').join('')+'</select></div><div class="notice notice-info">Your previous slot remains reserved unless the reschedule succeeds.</div><div class="modal-actions"><button type="button" class="button button-secondary" data-action="close-modal">Cancel</button><button type="submit" class="button button-primary">Confirm new time</button></div></form></div>';
+    showModalWithHistory();
+  }).catch(error=>showToast(firebaseErrorMessage(error),'error'));
+}
 function resetAutoLogoutTimer() {
   clearTimeout(inactivityTimer);
   if (!session()) return;
