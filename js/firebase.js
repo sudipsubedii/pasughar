@@ -270,7 +270,7 @@ export async function createProductEnquiry({productId, productName, retailerId, 
     productId, productName:String(productName||'').slice(0,160), retailerId,
     customerUid:auth.currentUser.uid, customerName:String(customerName||auth.currentUser.displayName||'Customer').trim().slice(0,120),
     customerEmail:auth.currentUser.email||'', customerPhone:String(customerPhone||auth.currentUser.phoneNumber||'').slice(0,40),
-    message:text.slice(0,1500), reply:'', status:'open',
+    message:text.slice(0,1500), messages:[], reply:'', status:'open',
     createdAt:serverTimestamp(), updatedAt:serverTimestamp()
   });
 }
