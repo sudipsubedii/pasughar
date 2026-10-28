@@ -120,7 +120,7 @@ service cloud.firestore {
 
     // Breeding date requests: customer creates; customer, assigned retailer, and admin can read.
     match /breedingBookings/{bookingId} {
-      allow create: if signedIn()
+      allow create: if hasVerifiedContact()
         && request.resource.data.keys().hasOnly(['productId','productName','retailerId','customerUid','customerName','customerEmail','customerPhone','location','requestedDate','note','status','createdAt','updatedAt'])
         && request.resource.data.customerUid == request.auth.uid
         && request.resource.data.productId is string
