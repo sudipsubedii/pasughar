@@ -8,11 +8,11 @@ import {
   getAuth, GoogleAuthProvider, RecaptchaVerifier, onAuthStateChanged, signInWithPopup,
   signInWithPhoneNumber, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut,
   sendPasswordResetEmail, sendEmailVerification, getIdTokenResult, setPersistence,
-  browserLocalPersistence, browserSessionPersistence, reload
+  browserLocalPersistence, browserSessionPersistence, reload, updateProfile
 } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-auth.js';
 import {
   getFirestore, collection, doc, getDoc, onSnapshot, query, where, addDoc,
-  setDoc, updateDoc, deleteDoc, getDocs, writeBatch, serverTimestamp, deleteField
+  setDoc, updateDoc, deleteDoc, getDocs, writeBatch, serverTimestamp, deleteField, arrayUnion
 } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js';
 import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-functions.js';
 import { store, configurePersistenceAdapter, hydrateCollection } from './store.js';
@@ -179,6 +179,71 @@ export async function submitProductReview({productId,orderId,rating,body}) {
   });
   return {id:reviewId};
 }
+export async function saveCustomerProfile({displayName, phone}) {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sign in before editing your profile.');
+  await ensureUserProfile(user, 'customer');
+  const name = String(displayName || '').trim();
+  const contactPhone = String(phone || '').trim();
+  if (!name || name.length > 100) throw new Error('Enter a name of 1 to 100 characters.');
+  if (contactPhone) {
+    const digits = contactPhone.replace(/\D/g, '');
+    const local = digits.startsWith('977') ? digits.slice(3) : digits.startsWith('0') ? digits.slice(1) : digits;
+    if (!/^9[6-8]\d{8}$/.test(local)) throw new Error('Enter a valid Nepali mobile number, for example 98XXXXXXXX.');
+  }
+  await updateDoc(doc(db,'users',user.uid), {
+    displayName:name, phone:contactPhone, updatedAt:serverTimestamp()
+  });
+  if (user.displayName !== name) await updateProfile(user,{displayName:name});
+  return {displayName:name, phone:contactPhone};
+}
+export async function saveCustomerWishlist(productIds) {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sign in to sync your wishlist.');
+  const ids = [...new Set((Array.isArray(productIds)?productIds:[]).map(String).filter(Boolean))].slice(0,250);
+  await setDoc(doc(db,'wishlists',user.uid), {
+    userId:user.uid, productIds:ids, updatedAt:serverTimestamp()
+  }, {merge:true});
+  return ids;
+}
+export async function markCustomerNotificationRead(notificationId) {
+  const user = auth.currentUser;
+  if (!user || !notificationId) throw new Error('Sign in to manage notifications.');
+  await updateDoc(doc(db,'users',user.uid,'notifications',notificationId),{
+    read:true, readAt:serverTimestamp()
+  });
+}
+export async function sendEnquiryMessage(enquiryId, message, senderRole = 'customer') {
+  const user = auth.currentUser;
+  const text = String(message || '').trim();
+  if (!user) throw new Error('Sign in to continue the conversation.');
+  if (!enquiryId || text.length < 2 || text.length > 1500) throw new Error('Message must contain 2 to 1,500 characters.');
+  if (!['customer','retailer'].includes(senderRole)) throw new Error('Invalid sender role.');
+  const msg = {senderUid:user.uid,senderRole,body:text,createdAt:new Date().toISOString()};
+  await updateDoc(doc(db,'enquiries',enquiryId),{
+    messages:arrayUnion(msg),
+    ...(senderRole === 'retailer' ? {reply:text,status:'replied'} : {status:'open'}),
+    updatedAt:serverTimestamp()
+  });
+}
+export async function getVeterinaryProviders() {
+  const snap = await getDocs(query(collection(db,'publicStores'),where('isVet','==',true)));
+  return snap.docs.map(d=>({id:d.id,...toPlain(d.data())}));
+}
+export async function getAvailableVetSlots({storeId, appointmentDate, excludeAppointmentId = ''}) {
+  const result = await getCallable('getAvailableVetSlots')({storeId, appointmentDate, excludeAppointmentId});
+  return result.data;
+}
+export async function createVetAppointment({storeId, appointmentDate, slot, customerName, customerPhone, petName, reason}) {
+  const result = await getCallable('createVetAppointment')({
+    storeId, appointmentDate, slot, customerName, customerPhone, petName, reason
+  });
+  return result.data;
+}
+export async function manageVetAppointment({appointmentId, action, appointmentDate, slot}) {
+  const result = await getCallable('manageVetAppointment')({appointmentId,action,appointmentDate,slot});
+  return result.data;
+}
 export async function getPublicStoreProfile(storeId) {
   if (!storeId) throw new Error('Store ID is missing.');
   const snap = await getDoc(doc(db,'publicStores',storeId));
@@ -199,6 +264,7 @@ async function writePublicStore(retailer) {
     openingHours:String(retailer.openingHours||'').slice(0,700),
     vetSpecialties:Array.isArray(retailer.vetSpecialties)?retailer.vetSpecialties.slice(0,20):[],
     vetAvailability:String(retailer.vetAvailability||'').slice(0,700),
+    vetAppointmentSlots:Array.isArray(retailer.vetAppointmentSlots)?retailer.vetAppointmentSlots.map(x=>String(x).trim()).filter(x=>/^([01]\d|2[0-3]):[0-5]\d$/.test(x)).slice(0,24):[],
     consultationFee:Math.max(0,Number(retailer.consultationFee)||0),
     isVet:Boolean(retailer.isVet),
     updatedAt:serverTimestamp()
@@ -214,15 +280,12 @@ export async function createProductEnquiry({productId, productName, retailerId, 
     productId, productName:String(productName||'').slice(0,160), retailerId,
     customerUid:auth.currentUser.uid, customerName:String(customerName||auth.currentUser.displayName||'Customer').trim().slice(0,120),
     customerEmail:auth.currentUser.email||'', customerPhone:String(customerPhone||auth.currentUser.phoneNumber||'').slice(0,40),
-    message:text.slice(0,1500), reply:'', status:'open',
+    message:text.slice(0,1500), messages:[], reply:'', status:'open',
     createdAt:serverTimestamp(), updatedAt:serverTimestamp()
   });
 }
 export async function replyToEnquiry(enquiryId, reply) {
-  if (!auth.currentUser) throw new Error('Sign in to reply.');
-  const text=String(reply||'').trim();
-  if(!enquiryId||text.length<2||text.length>1500) throw new Error('Reply must contain 2 to 1,500 characters.');
-  return updateDoc(doc(db,'enquiries',enquiryId),{reply:text,status:'replied',updatedAt:serverTimestamp()});
+  return sendEnquiryMessage(enquiryId, reply, 'retailer');
 }
 export async function saveRetailerVerificationAndProfile({retailerId, updates}) {
   const user=auth.currentUser;
@@ -465,20 +528,33 @@ export function startFirebaseBridge({ onSessionChanged }) {
       mergeProducts();
     });
     listen(query(collection(db, 'breedingBookings'), where('retailerId', '==', uid)), snapshot => hydrateCollection('breedingBookings', unpack(snapshot)));
+    listen(query(collection(db, 'vetAppointments'), where('storeId', '==', uid)), snapshot => hydrateCollection('vetAppointments', unpack(snapshot)));
     listen(query(collection(db, 'enquiries'), where('retailerId', '==', uid)), snapshot => hydrateCollection('enquiries', unpack(snapshot)));
     listen(query(collection(db, 'retailerOrders'), where('retailerId', '==', uid)), snapshot => {
       ownRetailerOrderDocs = unpack(snapshot);
       const orders = ownRetailerOrderDocs.map(order => ({
-        ...order,
-        id: order.id,
-        total: Number(order.subtotal || 0),
-        customerName: order.customerName || 'Customer',
-        customerEmail: order.customerEmail || '',
-        items: (order.items || []).map(item => ({
-          ...item, id: item.productId, qty: Number(item.quantity || 0), price: Number(item.unitPrice || 0)
-        }))
+        ...order, id: order.id, total: Number(order.subtotal || 0),
+        customerName: order.customerName || 'Customer', customerEmail: order.customerEmail || '',
+        items: (order.items || []).map(item => ({...item, id:item.productId, qty:Number(item.quantity||0), price:Number(item.unitPrice||0)}))
       }));
       hydrateCollection('orders', orders);
+    });
+  };
+  const startCustomerData = uid => {
+    listen(query(collection(db, 'orders'), where('customerId', '==', uid)), snapshot => hydrateCollection('orders', unpack(snapshot)));
+    listen(query(collection(db, 'enquiries'), where('customerUid', '==', uid)), snapshot => hydrateCollection('enquiries', unpack(snapshot)));
+    listen(query(collection(db, 'breedingBookings'), where('customerUid', '==', uid)), snapshot => hydrateCollection('breedingBookings', unpack(snapshot)));
+    listen(query(collection(db, 'vetAppointments'), where('customerUid', '==', uid)), snapshot => hydrateCollection('vetAppointments', unpack(snapshot)));
+    listen(collection(db, 'users', uid, 'notifications'), snapshot => hydrateCollection('notifications', unpack(snapshot)));
+    listen(doc(db, 'wishlists', uid), snapshot => {
+      const cloudIds = snapshot.exists() && Array.isArray(snapshot.data().productIds) ? snapshot.data().productIds : null;
+      if (cloudIds) {
+        window.dispatchEvent(new CustomEvent('pashughar:wishlist-cloud-loaded',{detail:{uid,productIds:cloudIds}}));
+      } else {
+        const guestIds = store.wishlist();
+        if (guestIds.length) saveCustomerWishlist(guestIds).catch(fireError);
+        window.dispatchEvent(new CustomEvent('pashughar:wishlist-cloud-loaded',{detail:{uid,productIds:guestIds}}));
+      }
     });
   };
   const startAdminData = () => {
@@ -488,6 +564,7 @@ export function startFirebaseBridge({ onSessionChanged }) {
     listen(collection(db, 'orders'), snapshot => hydrateCollection('orders', unpack(snapshot)));
     listen(collection(db, 'reports'), snapshot => hydrateCollection('reports', unpack(snapshot)));
     listen(collection(db, 'breedingBookings'), snapshot => hydrateCollection('breedingBookings', unpack(snapshot)));
+    listen(collection(db, 'vetAppointments'), snapshot => hydrateCollection('vetAppointments', unpack(snapshot)));
     listen(collection(db, 'enquiries'), snapshot => hydrateCollection('enquiries', unpack(snapshot)));
   };
 
@@ -503,6 +580,8 @@ export function startFirebaseBridge({ onSessionChanged }) {
       hydrateCollection('orders', []);
       hydrateCollection('breedingBookings', []);
       hydrateCollection('enquiries', []);
+      hydrateCollection('vetAppointments', []);
+      hydrateCollection('notifications', []);
       startPublicData();
       onSessionChanged(null);
       return;
@@ -525,10 +604,11 @@ export function startFirebaseBridge({ onSessionChanged }) {
     const userRole = profileData.role === 'retailer' || retailerExists ? 'retailer' : 'customer';
     const session = {
       uid: user.uid,
-      name: user.displayName || user.email?.split('@')[0] || user.phoneNumber || 'Customer',
+      name: user.displayName || profileData.displayName || user.email?.split('@')[0] || user.phoneNumber || 'Customer',
       email: user.email || '',
-      photoURL: user.photoURL || '',
+      photoURL: user.photoURL || profileData.photoURL || '',
       phoneNumber: user.phoneNumber || '',
+      profilePhone: profileData.phone || '',
       emailVerified: Boolean(user.emailVerified),
       role: isAdmin ? 'admin' : userRole,
       firebase: true
@@ -540,6 +620,7 @@ export function startFirebaseBridge({ onSessionChanged }) {
     }
     startPublicData();
     if (session.role === 'retailer') startRetailerData(user.uid);
+    else startCustomerData(user.uid);
   });
   return () => { stopDataListeners(); unsubscribeAuth(); };
 }

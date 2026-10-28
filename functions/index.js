@@ -1,5 +1,7 @@
 const crypto = require('crypto');
 const {onCall, HttpsError} = require('firebase-functions/v2/https');
+const {onDocumentCreated, onDocumentUpdated} = require('firebase-functions/v2/firestore');
+const {onSchedule} = require('firebase-functions/v2/scheduler');
 const {setGlobalOptions} = require('firebase-functions/v2');
 const {initializeApp} = require('firebase-admin/app');
 const {getFirestore, FieldValue} = require('firebase-admin/firestore');
@@ -50,7 +52,7 @@ exports.createOrder = onCall(async (request) => {
   if (!Array.isArray(items) || items.length < 1 || items.length > 30) {
     throw new HttpsError('invalid-argument', 'Add between 1 and 30 order lines.');
   }
-  if (!shipping || !asText(shipping.name, 120) || !asText(shipping.phone, 40) || !asText(shipping.address, 300) || !asText(shipping.city, 100)) {
+  if (!shipping || !asText(shipping.name, 120) || !asText(shipping.phone, 40) || !asText(shipping.address, 300) || !asText(shipping.city, 100) || !asText(shipping.province, 80) || !asText(shipping.district, 100) || !asText(shipping.municipality, 120) || !['morning','midday','afternoon','coordinate'].includes(asText(shipping.deliverySlot, 30))) {
     throw new HttpsError('invalid-argument', 'Complete all required delivery details.');
   }
   if (!['cod', 'contact_seller'].includes(paymentMethod)) {
@@ -98,6 +100,10 @@ exports.createOrder = onCall(async (request) => {
         throw new HttpsError('failed-precondition', `${product.name || 'A product'} is not available.`);
       }
       if (!Number.isFinite(Number(product.stock)) || Number(product.stock) < quantity) throw new HttpsError('failed-precondition', `${product.name || 'A product'} does not have enough stock.`);
+      const minOrderQuantity = Number(product.minOrderQuantity ?? product.attributes?.minOrderQuantity ?? 0);
+      const orderStep = Number(product.orderStep ?? product.attributes?.orderStep ?? (['kg','litre'].includes(String(product.unit||'').toLowerCase()) ? 0.5 : 1));
+      if (minOrderQuantity > 0 && quantity < minOrderQuantity) throw new HttpsError('invalid-argument', `${product.name || 'This product'} must be ordered in quantities of at least ${minOrderQuantity} ${product.unit || 'unit'}.`);
+      if (!Number.isFinite(orderStep) || orderStep <= 0 || Math.abs(quantity / orderStep - Math.round(quantity / orderStep)) > 0.0001) throw new HttpsError('invalid-argument', `${product.name || 'This product'} must be ordered in increments of ${orderStep} ${product.unit || 'unit'}.`);
       if (!['kg','litre'].includes(String(product.unit||'').toLowerCase()) && !Number.isInteger(quantity)) throw new HttpsError('invalid-argument', `${product.name || 'This product'} must be ordered in whole units.`);
       if (typeof product.price !== 'number' || product.price <= 0) throw new HttpsError('failed-precondition', 'A product has an invalid price.');
       if (!product.retailerId) throw new HttpsError('failed-precondition', 'A product is missing its retailer assignment.');
@@ -123,7 +129,7 @@ exports.createOrder = onCall(async (request) => {
       customerId: auth ? auth.uid : null,
       customerEmail: asText((auth && auth.token.email) || shipping.email, 254),
       customerName: asText(shipping.name, 120),
-      shipping: {name: asText(shipping.name, 120), phone: asText(shipping.phone, 40), address: asText(shipping.address, 300), city: asText(shipping.city, 100), email: asText(shipping.email || (auth && auth.token.email) || '', 254)},
+      shipping: {name: asText(shipping.name, 120), phone: asText(shipping.phone, 40), address: asText(shipping.address, 300), city: asText(shipping.city, 100), province: asText(shipping.province, 80), district: asText(shipping.district, 100), municipality: asText(shipping.municipality, 120), deliverySlot: asText(shipping.deliverySlot, 30), email: asText(shipping.email || (auth && auth.token.email) || '', 254)},
       notes: asText(shipping.notes, 800),
       items: resolvedItems,
       productIds: resolvedItems.map(item => item.productId),
@@ -142,7 +148,7 @@ exports.createOrder = onCall(async (request) => {
         orderId: orderRef.id, retailerId, customerId: auth ? auth.uid : null,
         customerName: asText(shipping.name, 120),
         customerEmail: asText(shipping.email || (auth && auth.token.email) || '', 254),
-        shipping: {name: asText(shipping.name, 120), phone: asText(shipping.phone, 40), address: asText(shipping.address, 300), city: asText(shipping.city, 100)},
+        shipping: {name: asText(shipping.name, 120), phone: asText(shipping.phone, 40), address: asText(shipping.address, 300), city: asText(shipping.city, 100), province: asText(shipping.province, 80), district: asText(shipping.district, 100), municipality: asText(shipping.municipality, 120), deliverySlot: asText(shipping.deliverySlot, 30)},
         items: retailerItems,
         subtotal: Math.round(retailerItems.reduce((sum, i) => sum + i.lineTotal, 0) * 100) / 100,
         paymentMethod, status: 'Pending', createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp()
@@ -346,3 +352,218 @@ exports.updateRetailerOrderStatus = onCall(async request => {
  * getAuth().setCustomUserClaims(userUid, {admin:true});
  * A deployed admin dashboard must rely on that claim plus Firestore Rules/Functions.
  */
+
+function validNepalMobile(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  const local = digits.startsWith('977') ? digits.slice(3) : digits.startsWith('0') ? digits.slice(1) : digits;
+  return /^9[6-8]\d{8}$/.test(local);
+}
+function validDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value||''))) return false;
+  const d = new Date(value + 'T00:00:00Z');
+  return Number.isFinite(d.getTime()) && d.toISOString().slice(0,10) === value;
+}
+function appointmentInstant(date, slot) {
+  if (!validDate(date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(slot||''))) return null;
+  return new Date(date + 'T' + slot + ':00+05:45');
+}
+function pushNotificationTx(tx, uid, {type,title,body,relatedId}) {
+  if (!uid) return;
+  const ref = db.collection('users').doc(uid).collection('notifications').doc();
+  tx.create(ref, {
+    type: asText(type,40), title: asText(title,120), body: asText(body,500),
+    relatedId: asText(relatedId,180), read:false, createdAt:FieldValue.serverTimestamp()
+  });
+}
+function slotLockId(storeId, date, slot) {
+  return hash('vet-slot:' + storeId + ':' + date + ':' + slot);
+}
+
+/** Return only provider slots which remain unreserved on a selected Nepal-local date. */
+exports.getAvailableVetSlots = onCall(async request => {
+  requireAuth(request);
+  const storeId = cleanId(request.data && request.data.storeId,160);
+  const date = asText(request.data && request.data.appointmentDate,10);
+  const excludeAppointmentId = cleanId(request.data && request.data.excludeAppointmentId,160);
+  if (!storeId || !validDate(date)) throw new HttpsError('invalid-argument','Choose a valid appointment date.');
+  const providerSnap = await db.collection('publicStores').doc(storeId).get();
+  if (!providerSnap.exists || providerSnap.data().isVet !== true) throw new HttpsError('failed-precondition','This provider is not accepting veterinary appointments.');
+  const slots = Array.isArray(providerSnap.data().vetAppointmentSlots) ? providerSnap.data().vetAppointmentSlots : [];
+  if (!slots.length) return {slots:[]};
+  const refs = slots.map(slot => db.collection('vetSlotLocks').doc(slotLockId(storeId,date,slot)));
+  const lockSnaps = await db.getAll(...refs);
+  const now = Date.now();
+  const availableSlots = slots.filter((slot,index) => {
+    const instant = appointmentInstant(date,slot);
+    if (!instant || instant.getTime() <= now) return false;
+    const lock = lockSnaps[index];
+    return !lock.exists || lock.data().active !== true || lock.data().appointmentId === excludeAppointmentId;
+  });
+  return {slots:availableSlots};
+});
+
+/**
+ * Reserve a veterinary appointment slot atomically. Slot-lock documents prevent two
+ * customers booking the same provider/date/time even when requests arrive simultaneously.
+ */
+exports.createVetAppointment = onCall(async request => {
+  const auth = requireAuth(request);
+  if (!(auth.token.email_verified === true || (typeof auth.token.phone_number === 'string' && auth.token.phone_number.trim()))) {
+    throw new HttpsError('unauthenticated','Verify your email or phone before booking a veterinary appointment.');
+  }
+  const storeId = cleanId(request.data && request.data.storeId,160);
+  const date = asText(request.data && request.data.appointmentDate,10);
+  const slot = asText(request.data && request.data.slot,5);
+  const customerName = asText(request.data && request.data.customerName,120);
+  const customerPhone = asText(request.data && request.data.customerPhone,40);
+  const petName = asText(request.data && request.data.petName,100);
+  const reason = asText(request.data && request.data.reason,1000);
+  const instant = appointmentInstant(date,slot);
+  if (!storeId || !instant || instant.getTime() <= Date.now() || !customerName || !validNepalMobile(customerPhone)) {
+    throw new HttpsError('invalid-argument','Choose a future date and available time, enter your name, and provide a valid Nepali mobile number.');
+  }
+  if (!reason) throw new HttpsError('invalid-argument','Describe the reason for the visit.');
+  const storeRef = db.collection('publicStores').doc(storeId);
+  const appointmentRef = db.collection('vetAppointments').doc();
+  const lockRef = db.collection('vetSlotLocks').doc(slotLockId(storeId,date,slot));
+  return db.runTransaction(async tx => {
+    const [storeSnap, lockSnap] = await Promise.all([tx.get(storeRef),tx.get(lockRef)]);
+    if (!storeSnap.exists || storeSnap.data().isVet !== true) throw new HttpsError('failed-precondition','This provider is not currently accepting veterinary appointments.');
+    const provider = storeSnap.data();
+    const slots = Array.isArray(provider.vetAppointmentSlots) ? provider.vetAppointmentSlots : [];
+    if (!slots.includes(slot)) throw new HttpsError('failed-precondition','That appointment time is not offered by this provider.');
+    if (lockSnap.exists && lockSnap.data().active === true) throw new HttpsError('already-exists','That time slot was just booked. Please choose another.');
+    tx.create(appointmentRef,{
+      customerUid:auth.uid,storeId,storeName:asText(provider.storeName,100),
+      appointmentDate:date,slot,customerName,customerPhone,petName,
+      reason,status:'confirmed',createdAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),
+      reminder24hSent:false,reminder1hSent:false
+    });
+    tx.set(lockRef,{appointmentId:appointmentRef.id,storeId,appointmentDate:date,slot,active:true,updatedAt:FieldValue.serverTimestamp()});
+    pushNotificationTx(tx,auth.uid,{type:'appointment',title:'Veterinary appointment booked',body:'Your appointment with '+asText(provider.storeName,100)+' is booked for '+date+' at '+slot+' (Nepal time).',relatedId:appointmentRef.id});
+    pushNotificationTx(tx,storeId,{type:'appointment',title:'New veterinary appointment',body:customerName+' booked '+date+' at '+slot+'.',relatedId:appointmentRef.id});
+    return {appointmentId:appointmentRef.id,status:'confirmed',appointmentDate:date,slot,storeName:asText(provider.storeName,100)};
+  });
+});
+
+/** A customer can cancel or move their own appointment. Only the assigned provider/admin can mark it complete. */
+exports.manageVetAppointment = onCall(async request => {
+  const auth = requireAuth(request);
+  const appointmentId = cleanId(request.data && request.data.appointmentId,160);
+  const action = asText(request.data && request.data.action,20);
+  if (!appointmentId || !['cancel','reschedule','complete'].includes(action)) throw new HttpsError('invalid-argument','Choose a valid appointment action.');
+  const appointmentRef = db.collection('vetAppointments').doc(appointmentId);
+  return db.runTransaction(async tx => {
+    const snap = await tx.get(appointmentRef);
+    if (!snap.exists) throw new HttpsError('not-found','Appointment not found.');
+    const a = snap.data();
+    const isOwner = a.customerUid === auth.uid;
+    const isProvider = a.storeId === auth.uid;
+    if (action === 'complete') {
+      if (!(isProvider || isAdmin(auth))) throw new HttpsError('permission-denied','Only the assigned provider can complete this appointment.');
+      if (!['confirmed','completed'].includes(a.status)) throw new HttpsError('failed-precondition','Only a confirmed appointment can be completed.');
+      tx.update(appointmentRef,{status:'completed',updatedAt:FieldValue.serverTimestamp()});
+      pushNotificationTx(tx,a.customerUid,{type:'appointment',title:'Appointment marked complete',body:'Your appointment with '+asText(a.storeName,100)+' has been marked complete.',relatedId:appointmentId});
+      return {appointmentId,status:'completed'};
+    }
+    if (!isOwner) throw new HttpsError('permission-denied','Only the customer who booked this appointment can cancel or reschedule it.');
+    if (!['confirmed','reschedule-requested'].includes(a.status)) throw new HttpsError('failed-precondition','This appointment can no longer be changed.');
+    const oldLockRef = db.collection('vetSlotLocks').doc(slotLockId(a.storeId,a.appointmentDate,a.slot));
+    const oldLockSnap = await tx.get(oldLockRef);
+    if (action === 'cancel') {
+      tx.update(appointmentRef,{status:'cancelled',cancelledAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp()});
+      if (oldLockSnap.exists && oldLockSnap.data().appointmentId === appointmentId) tx.update(oldLockRef,{active:false,updatedAt:FieldValue.serverTimestamp()});
+      pushNotificationTx(tx,a.storeId,{type:'appointment',title:'Appointment cancelled',body:a.customerName+' cancelled '+a.appointmentDate+' at '+a.slot+'.',relatedId:appointmentId});
+      pushNotificationTx(tx,a.customerUid,{type:'appointment',title:'Appointment cancelled',body:'Your appointment with '+asText(a.storeName,100)+' has been cancelled.',relatedId:appointmentId});
+      return {appointmentId,status:'cancelled'};
+    }
+    const date = asText(request.data && request.data.appointmentDate,10);
+    const slot = asText(request.data && request.data.slot,5);
+    const instant = appointmentInstant(date,slot);
+    if (!instant || instant.getTime() <= Date.now()) throw new HttpsError('invalid-argument','Choose a valid future date and time.');
+    const storeRef = db.collection('publicStores').doc(a.storeId);
+    const newLockRef = db.collection('vetSlotLocks').doc(slotLockId(a.storeId,date,slot));
+    const [storeSnap,newLockSnap] = await Promise.all([tx.get(storeRef),tx.get(newLockRef)]);
+    if (!storeSnap.exists || storeSnap.data().isVet !== true || !(storeSnap.data().vetAppointmentSlots||[]).includes(slot)) throw new HttpsError('failed-precondition','That slot is not offered by this provider.');
+    if (newLockSnap.exists && newLockSnap.data().active === true && newLockSnap.data().appointmentId !== appointmentId) throw new HttpsError('already-exists','That time slot is already booked. Please choose another.');
+    if (oldLockRef.path !== newLockRef.path && oldLockSnap.exists && oldLockSnap.data().appointmentId === appointmentId) tx.update(oldLockRef,{active:false,updatedAt:FieldValue.serverTimestamp()});
+    tx.set(newLockRef,{appointmentId,storeId:a.storeId,appointmentDate:date,slot,active:true,updatedAt:FieldValue.serverTimestamp()});
+    tx.update(appointmentRef,{appointmentDate:date,slot,status:'confirmed',reminder24hSent:false,reminder1hSent:false,updatedAt:FieldValue.serverTimestamp()});
+    pushNotificationTx(tx,a.storeId,{type:'appointment',title:'Appointment rescheduled',body:a.customerName+' moved the appointment to '+date+' at '+slot+'.',relatedId:appointmentId});
+    pushNotificationTx(tx,a.customerUid,{type:'appointment',title:'Appointment rescheduled',body:'Your appointment is now '+date+' at '+slot+' (Nepal time).',relatedId:appointmentId});
+    return {appointmentId,status:'confirmed',appointmentDate:date,slot};
+  });
+});
+
+/** Notify customers who have an account-owned order when retailer status changes. */
+exports.notifyOrderStatusChanged = onDocumentUpdated('orders/{orderId}', async event => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  if (!after || !after.customerId || before.status === after.status) return;
+  await db.collection('users').doc(after.customerId).collection('notifications').doc(hash('order-status:'+event.id)).set({
+    type:'order',title:'Order status updated',
+    body:'Order '+event.params.orderId+' is now '+asText(after.status,60)+'.',
+    relatedId:event.params.orderId,read:false,createdAt:FieldValue.serverTimestamp()
+  }, {merge:true});
+});
+
+/** Wishlist notifications for real price reductions and out-of-stock -> back-in-stock transitions. */
+exports.notifyWishlistProductChanges = onDocumentUpdated('products/{productId}', async event => {
+  const before = event.data.before.data(), after = event.data.after.data();
+  if (!before || !after) return;
+  const priceDrop = Number(after.price) > 0 && Number(before.price) > Number(after.price);
+  const restock = Number(before.stock) <= 0 && Number(after.stock) > 0 && after.status === 'approved';
+  if (!priceDrop && !restock) return;
+  const wishlists = await db.collection('wishlists').where('productIds','array-contains',event.params.productId).get();
+  const batch = db.batch();
+  for (const w of wishlists.docs) {
+    const userId = w.id;
+    const title = priceDrop ? 'A saved item is cheaper' : 'A saved item is back in stock';
+    const body = priceDrop
+      ? asText(after.name,160)+' price changed from NPR '+before.price+' to NPR '+after.price+'.'
+      : asText(after.name,160)+' is available again.';
+    batch.set(db.collection('users').doc(userId).collection('notifications').doc(hash('wishlist-change:'+event.id+':'+userId)),{
+      type:priceDrop?'price-drop':'restock',title,body,relatedId:event.params.productId,read:false,createdAt:FieldValue.serverTimestamp()
+    }, {merge:true});
+  }
+  if (!wishlists.empty) await batch.commit();
+});
+
+/** Creates in-site reminders for appointments in the next 25 hours. */
+exports.sendAppointmentReminders = onSchedule('every 30 minutes', async () => {
+  const now = Date.now();
+  const fromDate = new Date(now - 24*60*60*1000).toISOString().slice(0,10);
+  const toDate = new Date(now + 3*24*60*60*1000).toISOString().slice(0,10);
+  const snap = await db.collection('vetAppointments').where('appointmentDate','>=',fromDate).where('appointmentDate','<=',toDate).get();
+  for (const d of snap.docs) {
+    const a=d.data();
+    if (!['confirmed'].includes(a.status)) continue;
+    const instant=appointmentInstant(a.appointmentDate,a.slot);
+    if (!instant) continue;
+    const gap=instant.getTime()-now;
+    const reminderType = gap >= 23*60*60*1000 && gap <= 25*60*60*1000 && !a.reminder24hSent
+      ? '24h'
+      : gap >= 45*60*1000 && gap <= 75*60*1000 && !a.reminder1hSent ? '1h' : '';
+    if (!reminderType) continue;
+    const flag=reminderType==='24h'?'reminder24hSent':'reminder1hSent';
+    await db.runTransaction(async tx => {
+      const current=await tx.get(d.ref);
+      if (!current.exists || current.data().status!=='confirmed' || current.data()[flag]) return;
+      tx.update(d.ref,{[flag]:true,updatedAt:FieldValue.serverTimestamp()});
+      pushNotificationTx(tx,a.customerUid,{
+        type:'appointment-reminder',title:reminderType==='24h'?'Appointment reminder: tomorrow':'Appointment reminder: in about one hour',
+        body:'Appointment with '+asText(a.storeName,100)+' is scheduled for '+a.appointmentDate+' at '+a.slot+' (Nepal time).',
+        relatedId:d.id
+      });
+    });
+  }
+});
+exports.notifyOrderCreated = onDocumentCreated('orders/{orderId}', async event => {
+  const order=event.data && event.data.data();
+  if(!order || !order.customerId)return;
+  await db.collection('users').doc(order.customerId).collection('notifications').doc(hash('order-created:'+event.id)).set({
+    type:'order',title:'Order placed successfully',
+    body:'Your order '+event.params.orderId+' has been received. Current status: '+asText(order.status||'Pending',60)+'.',
+    relatedId:event.params.orderId,read:false,createdAt:FieldValue.serverTimestamp()
+  }, {merge:true});
+});
