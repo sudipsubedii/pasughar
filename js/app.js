@@ -1001,7 +1001,8 @@ function firebaseErrorMessage(error) {
     'auth/unauthorized-domain':'This website domain is not authorized in Firebase Authentication.',
     'permission-denied':'Firestore rejected this change. Confirm the security rules and account permissions.',
     'functions/not-found':'This server function is not deployed yet. No change was made.',
-    'functions/failed-precondition':'The requested action is not available for the current account or listing.'
+    'functions/failed-precondition':'The requested action is not available for the current account or listing.',
+    'functions/internal':'A server-side Firebase action failed. Shop and listing moderation now uses direct admin-authorized Firestore writes; other backend-only actions require Cloud Functions deployment.'
   };
   return messages[code] || error?.message || 'Firebase operation failed. No success was assumed.';
 }
@@ -1157,12 +1158,12 @@ document.addEventListener('click',e=>{
     const product=allProducts().find(p=>p.id===id);if(!product)return showToast('Product was not found.','warn');
     const decision=action==='approve-product'?'approved':'rejected';
     if(decision==='rejected'&&!confirm('Reject listing "'+product.name+'"? It will remain hidden from shoppers.'))return;
-    getCallable('moderateProduct')({productId:id,decision,reason:decision==='approved'?'Approved by admin from moderation queue':'Rejected by admin from moderation queue'})
+    moderateProductDirect({productId:id,decision,reason:decision==='approved'?'Approved by admin from moderation queue':'Rejected by admin from moderation queue'})
       .then(()=>{showToast(decision==='approved'?'Listing approved and published.':'Listing rejected.');renderAdmin();})
       .catch(error=>showToast(firebaseErrorMessage(error),'error'));
   }
   else if(action==='suspend-product'||action==='restore-product'||action==='admin-remove-product'){
-    if(isFirebaseConfigured()){if(action==='admin-remove-product'&&!confirm('Permanently remove this listing? Report history will remain.'))return;const p=getProduct(id);if(!p)return;const operation=action==='admin-remove-product'?getCallable('removeProduct')({productId:id}):getCallable('moderateProduct')({productId:id,decision:action==='suspend-product'?'suspended':'approved',reason:'Admin action from Pashughar dashboard'});operation.then(()=>{showToast(action==='admin-remove-product'?'Product removed.':action==='suspend-product'?'Product suspended.':'Product restored.');renderAdmin();}).catch(error=>showToast(firebaseErrorMessage(error),'error'));return;}
+    if(isFirebaseConfigured()){if(action==='admin-remove-product'&&!confirm('Permanently remove this listing? Report history will remain.'))return;const p=getProduct(id);if(!p)return;const operation=action==='admin-remove-product'?removeProductDirect({productId:id}):moderateProductDirect({productId:id,decision:action==='suspend-product'?'suspended':'approved',reason:'Admin action from Pashughar dashboard'});operation.then(()=>{showToast(action==='admin-remove-product'?'Product removed.':action==='suspend-product'?'Product suspended.':'Product restored.');renderAdmin();}).catch(error=>showToast(firebaseErrorMessage(error),'error'));return;}
     const products=allProducts();const p=products.find(x=>x.id===id);if(!p)return;
     if(action==='admin-remove-product'){
       if(!confirm(`Permanently remove “${p.name}” from this demo catalogue? Report history will remain.`))return;
@@ -1173,7 +1174,7 @@ document.addEventListener('click',e=>{
     }
   }
   else if(action==='verify-retailer'||action==='reject-retailer'||action==='suspend-retailer'||action==='reinstate-retailer'||action==='ban-retailer'){
-    if(isFirebaseConfigured()){const r=store.retailers().find(x=>x.id===id);if(!r)return;const decision=action==='verify-retailer'||action==='reinstate-retailer'?'approved':action==='reject-retailer'?'rejected':action==='suspend-retailer'?'suspended':'banned';if(action==='ban-retailer'&&!confirm(`Remove / ban ${r.storeName}? Its listing history will be retained.`))return;getCallable('moderateRetailer')({retailerId:r.ownerId||r.id,decision,reason:'Admin action from Pashughar dashboard'}).then(()=>{showToast(`Shop status changed to ${decision}.`);renderAdmin();}).catch(error=>showToast(firebaseErrorMessage(error),'error'));return;}
+    if(isFirebaseConfigured()){const r=store.retailers().find(x=>x.id===id);if(!r)return;const decision=action==='verify-retailer'||action==='reinstate-retailer'?'approved':action==='reject-retailer'?'rejected':action==='suspend-retailer'?'suspended':'banned';if(action==='ban-retailer'&&!confirm(`Remove / ban ${r.storeName}? Its listing history will be retained.`))return;moderateRetailerDirect({retailerId:r.ownerId||r.id,decision,reason:'Admin action from Pashughar dashboard'}).then(()=>{showToast(`Shop status changed to ${decision}.`);renderAdmin();}).catch(error=>showToast(firebaseErrorMessage(error),'error'));return;}
     const retailers=store.retailers();const r=retailers.find(x=>x.id===id);if(!r)return;
     let next=r.status;
     if(action==='verify-retailer')next='approved';
