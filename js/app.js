@@ -77,7 +77,7 @@ const getRoute = () => {
     'vet-care': ['shop','category=animal-care'], 'animal-care': ['shop','category=animal-care'],
     'animal-products': ['shop','category=animal-products'], 'products': ['shop',''],
     'marketplace': ['shop',''], 'cart': ['cart',''], 'wishlist': ['wishlist',''],
-    'saved': ['wishlist',''], 'seller': ['seller',''], 'login': ['seller',''],
+    'saved': ['wishlist',''], 'seller': ['dashboard',''], 'dashboard': ['dashboard',''], 'login': ['login',''], 'partner': ['partner',''],
     'admin': ['admin',''], 'about': ['about',''], 'learn': ['learn',''],
     'contact': ['contact',''], 'privacy': ['privacy',''], 'terms': ['terms','']
   };
@@ -423,12 +423,12 @@ function renderHome() {
   const products = activeProducts();
   const featured = products.slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).slice(0,4);
   app.innerHTML = `
-    <section class="hero"><div class="container hero-grid"><div class="hero-copy"><div class="eyebrow">One marketplace. Every animal need.</div><h1>${safe(store.siteSettings().bannerTitle || 'Everything for animals, all in one place.')}</h1><p>${safe(store.siteSettings().bannerText || 'Discover livestock, fresh meat, pets, pet essentials and animal products from retailers in one convenient marketplace.')}</p><div class="hero-actions"><a href="#shop" class="button button-primary">Explore marketplace <span>→</span></a><a href="#seller" class="button button-secondary">Become a retailer</a></div><div class="hero-proof"><span class="proof-point"><span class="proof-check">✓</span> Local retailers</span><span class="proof-point"><span class="proof-check">✓</span> Clear stock status</span><span class="proof-point"><span class="proof-check">✓</span> One easy marketplace</span></div></div>
+    <section class="hero"><div class="container hero-grid"><div class="hero-copy"><div class="eyebrow">One marketplace. Every animal need.</div><h1>${safe(store.siteSettings().bannerTitle || 'Everything for animals, all in one place.')}</h1><p>${safe(store.siteSettings().bannerText || 'Discover livestock, fresh meat, pets, pet essentials and animal products from retailers in one convenient marketplace.')}</p><div class="hero-actions"><a href="#shop" class="button button-primary">Explore marketplace <span>→</span></a><a href="#learn" class="button button-secondary">How it works</a></div><div class="hero-proof"><span class="proof-point"><span class="proof-check">✓</span> Local retailers</span><span class="proof-point"><span class="proof-check">✓</span> Clear stock status</span><span class="proof-point"><span class="proof-check">✓</span> One easy marketplace</span></div></div>
     <div class="hero-visual"><img src="${safe(store.siteSettings().bannerImage || "https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1200&q=85")}" alt="Pashughar homepage banner" fetchpriority="high"><div class="hero-sticker"><strong>All together.</strong><span>From farm essentials to pet favourites.</span></div><div class="hero-image-label"><span>Welcome to Pashughar</span><h2>Closer to the things you care for.</h2><p>Shop from a growing community of animal and farm retailers.</p></div></div></div></section>
     <section class="category-section"><div class="container">${sectionHeading('Browse the marketplace','What are you looking for?','Choose a category to start.')}</div><div class="container category-grid">${CATEGORIES.filter(c=>c.active!==false).map(c=>`<a class="category-card category-card--${c.id}" href="${c.id==='pets-supplies'?'#pets':'#shop?category='+c.id}" style="--category-accent:${c.palette.accent};--category-deep:${c.palette.deep};--category-wash:${c.palette.wash}"><img class="category-photo" src="${safe(c.image)}" alt="" loading="lazy"><span class="category-card-copy"><span class="category-kicker">${safe(c.kicker)}</span><h3>${safe(c.name)}</h3><p>${safe(c.cardDescription)}</p><span class="category-card-link">Explore category <span aria-hidden="true">↗</span></span></span></a>`).join('')}</div></section>
-    <section class="products-section"><div class="container">${sectionHeading('Picked for you','Recently added','New listings from participating retailers.','View all products')}<div class="product-grid">${featured.map(productCard).join('')}</div>${featured.length===0?(catalogueLoaded?emptyState('⌕','No products yet','Approved product listings will appear here.','#seller','Join as a retailer'):productSkeletons()):''}</div></section>
+    <section class="products-section"><div class="container">${sectionHeading('Picked for you','Recently added','New listings from participating retailers.','View all products')}<div class="product-grid">${featured.map(productCard).join('')}</div>${featured.length===0?(catalogueLoaded?emptyState('⌕','No products yet','Approved product listings will appear here.','#partner','Become a partner'):productSkeletons()):''}</div></section>
     ${renderSearchTrends()}<section class="trust-strip"><div class="container trust-grid"><div class="trust-item"><div class="trust-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 10.5 4.5 4h15L21 10.5M5 10.5v9h14v-9M9 19.5v-5h6v5M3 10.5a3 3 0 0 0 6 0 3 3 0 0 0 6 0 3 3 0 0 0 6 0"/></svg></div><div><strong>A wider choice</strong><span>Products from multiple retailers</span></div></div><div class="trust-item"><div class="trust-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 12.5 2.6 2.6L16.5 9"/></svg></div><div><strong>Clear availability</strong><span>Know what is in stock before ordering</span></div></div><div class="trust-item"><div class="trust-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg></div><div><strong>Local marketplace</strong><span>Discover sellers around Nepal</span></div></div><div class="trust-item"><div class="trust-icon"><svg class="ui-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.8 8.7c0 5.2-8.8 11-8.8 11s-8.8-5.8-8.8-11a4.8 4.8 0 0 1 8.8-2.4 4.8 4.8 0 0 1 8.8 2.4Z"/></svg></div><div><strong>Animal needs, together</strong><span>From livestock to everyday pet care</span></div></div></div></section>
-    <section class="seller-cta"><div class="container"><div class="seller-cta-inner"><div><div class="eyebrow">For retailers and suppliers</div><h2>Bring your animal products to more people.</h2><p>List your products, manage stock and keep orders organized with your own retailer workspace.</p></div><a href="#seller" class="button">Start selling on Pashughar <span>→</span></a></div></div></section>`;
+`;
 }
 
 function renderShop(params = new URLSearchParams()) {
@@ -788,7 +788,7 @@ function renderAccount() {
   authGateActive = false;
   const verified = isVerifiedContact({emailVerified:user.emailVerified,phoneNumber:user.phoneNumber});
   const roleName = user.role==='admin'?'Administrator':user.role==='retailer'?'Retailer':'Customer';
-  const destination = user.role==='admin'?'#admin':user.role==='retailer'?'#seller':'#shop';
+  const destination = user.role==='admin'?'#admin':user.role==='retailer'?'#dashboard':'#shop';
   const verifyBlock = verified
     ? '<div class="notice notice-info"><strong>Contact verified.</strong> You can continue using your account.</div>'
     : '<div class="notice notice-warn"><strong>Contact verification needed.</strong> Verify your email or use phone OTP before publishing listings or placing an account-based order.</div>'+(user.email?'<button class="button button-primary" type="button" data-action="send-email-verification">Send verification email</button> ':'')+'<button class="button button-secondary" type="button" data-action="refresh-verification">I have verified — refresh status</button>';
@@ -861,7 +861,7 @@ function renderPetSection(params) {
     ? '<article class="product-card pet-breeding-card"><div class="product-image-wrap"><a href="'+publicProductUrl(p)+'"><img class="product-image" src="'+safe(p.image||'')+'" alt="'+safe(p.name)+'" loading="lazy"></a><span class="product-badge">'+safe(p.location||'Location not set')+'</span></div><div class="product-content"><div class="product-store">'+safe(p.retailer||'Verified retailer')+'</div><a href="'+publicProductUrl(p)+'"><h3 class="product-title">'+safe(p.name)+'</h3></a><div class="product-meta"><span>'+safe(p.location||'Nepal')+'</span><span>'+safe((p.attributes && p.attributes.breed)||'Breed details on listing')+'</span></div><p class="small-muted">Fee / arrangement: '+money(p.price)+'</p><div class="pet-breeding-actions"><a class="button button-secondary button-wide" href="'+publicProductUrl(p)+'">View dog</a><button class="button button-primary button-wide" type="button" data-action="book-breeding" data-id="'+safe(p.id)+'">Request a date</button></div></div></article>'
     : productCard(p)).join('');
   const filters = [['pets','Pets'],['accessories','Pet accessories'],['breeding','Pet breeding']].map(x => '<a class="pet-filter-chip '+(x[0]===type?'active':'')+'" href="#pet-section?type='+x[0]+'">'+x[1]+'</a>').join('');
-  app.innerHTML = '<div class="page-wrap pet-marketplace"><div class="container"><div class="pet-page-top"><a class="button button-secondary" href="#pets">← Back to pet sections</a><div class="eyebrow">'+info.eyebrow+'</div><h1>'+info.title+'</h1><p>'+info.desc+'</p></div><div class="pet-filter-row">'+filters+'</div>'+(items.length?'<div class="product-grid">'+cards+'</div>':'<div class="pet-empty"><div class="pet-empty-icon">'+(type==='breeding'?'🐕':type==='accessories'?'🦴':'🐾')+'</div><h2>No listings yet</h2><p>'+info.empty+'</p><a class="button button-primary" href="#seller">Sell on Pashughar →</a></div>')+'</div></div>';
+  app.innerHTML = '<div class="page-wrap pet-marketplace"><div class="container"><div class="pet-page-top"><a class="button button-secondary" href="#pets">← Back to pet sections</a><div class="eyebrow">'+info.eyebrow+'</div><h1>'+info.title+'</h1><p>'+info.desc+'</p></div><div class="pet-filter-row">'+filters+'</div>'+(items.length?'<div class="product-grid">'+cards+'</div>':'<div class="pet-empty"><div class="pet-empty-icon">'+(type==='breeding'?'🐕':type==='accessories'?'🦴':'🐾')+'</div><h2>No listings yet</h2><p>'+info.empty+'</p><a class="button button-primary" href="#partner">Become a partner →</a></div>')+'</div></div>';
 }
 function routeTitle(path, params) {
   if (path.startsWith('product/')) return getProduct(decodeURIComponent(path.slice(8)))?.name || 'Product details';
@@ -905,9 +905,11 @@ function render() {
   const {path,params}=getRoute();
   delete app.dataset.sectionTheme;
   document.querySelectorAll('.nav-inner a').forEach(a=>a.classList.toggle('current',a.getAttribute('href')===`#${path}`));
-  const known = ['home','shop','pets','pet-section','cart','account','login','seller','admin','wishlist','orders','enquiries','profile','notifications','appointments','about','learn','contact','privacy','terms'];
+  const known = ['home','shop','pets','pet-section','cart','account','login','seller','dashboard','partner','admin','wishlist','orders','enquiries','profile','notifications','appointments','about','learn','contact','privacy','terms'];
   if(path==='home')renderHome();
-  else if(path==='login')renderAuthPage('customer');
+  else if(path==='login')renderAuthPage();
+  else if(path==='partner')renderPartnerRegistration();
+  else if(path==='dashboard'||path==='seller') { if(session()?.role==='retailer')renderSellerDashboard(); else renderAuthPage(); }
   else if(path==='shop') { activeShopQuery=params.get('q')??''; activeShopCategory=params.get('category')??''; renderShop(params); }
   else if(path==='pets')renderPetsHub();
   else if(path==='pet-section')renderPetSection(params);
@@ -915,7 +917,7 @@ function render() {
   else if(path.startsWith('store/'))renderPublicStore(decodeURIComponent(path.slice(6)));
   else if(path==='cart')renderCart();
   else if(path==='account')renderAccount();
-  else if(path==='seller') { if(session()?.role==='retailer')renderSellerDashboard(); else renderAuthPage('retailer'); }
+  else if(path==='seller'||path==='dashboard') { if(session()?.role==='retailer')renderSellerDashboard(); else renderAuthPage(); }
   else if(path==='admin') { if(session()?.role==='admin')renderAdmin(); else renderAdminLogin(); }
   else if(['wishlist','orders','enquiries','profile','notifications','appointments'].includes(path)) { renderCustomerFeature(path,app).then(handled=>{ if(!handled) renderSimplePage(path); }).catch(()=>renderSimplePage(path)); }
   else if(known.includes(path))renderSimplePage(path);
@@ -1122,7 +1124,7 @@ function endDemoSession() {
   const role = session()?.role;
   store.saveSession(null);
   if (role === 'admin') { navigate('#admin'); if (getRoute().path === 'admin') render(); }
-  else if (role === 'retailer') { navigate('#seller'); if (getRoute().path === 'seller') render(); }
+  else if (role === 'retailer') { navigate('#dashboard'); if (getRoute().path === 'seller') render(); }
   else { navigate('#home'); if (getRoute().path === 'home') render(); }
 }
 
@@ -1182,7 +1184,7 @@ document.addEventListener('click',e=>{
     }).catch(error=>showToast(firebaseErrorMessage(error),'error'));
   }
   else if(action==='confirm-phone-otp'){
-    const code=document.getElementById('auth-otp')?.value||'';authRole=document.getElementById('auth-role')?.value||authRole;
+    const code=document.getElementById('auth-otp')?.value||'';authRole='customer';
     confirmPhoneOtp(code,authRole).then(credential=>{firebaseSession={...(firebaseSession||{}),uid:credential.user.uid,name:credential.user.displayName||credential.user.phoneNumber,phoneNumber:credential.user.phoneNumber,email:credential.user.email||'',emailVerified:credential.user.emailVerified,role:credential.pashugharRole||authRole,firebase:true};showToast('Phone verified. Signed in successfully.');navigate((credential.pashugharRole||authRole)==='retailer'?'#seller':'#shop');}).catch(error=>showToast(firebaseErrorMessage(error),'error'));
   }
   else if(action==='auth-password-reset'){
@@ -1231,7 +1233,7 @@ document.addEventListener('click',e=>{
   else if(action==='apply-price-filter'){const min=document.getElementById('price-min')?.value??'';const max=document.getElementById('price-max')?.value??'';if(min!==''&&Number(min)<0||max!==''&&Number(max)<0)return showToast('Prices cannot be negative.','warn');if(min!==''&&max!==''&&Number(min)>Number(max))return showToast('Minimum price must not exceed maximum price.','warn');activePriceMin=min;activePriceMax=max;activeShopPage=1;renderShop(new URLSearchParams());}
   else if(action==='page-listings'){activeShopPage=Math.max(1,Number(actionEl.dataset.page)||1);renderShop(new URLSearchParams());document.querySelector('.shop-toolbar')?.scrollIntoView({behavior:'smooth',block:'start'});}
   else if(action==='near-me'){if(!navigator.geolocation)return showToast('Geolocation is not available in this browser.','warn');if(locationPermissionRequested&&nearMeEnabled){nearMeEnabled=false;shopperGeo=null;activeShopSort='featured';renderShop(new URLSearchParams());return;}locationPermissionRequested=true;actionEl.disabled=true;actionEl.textContent='Finding location…';navigator.geolocation.getCurrentPosition(position=>{shopperGeo={lat:position.coords.latitude,lng:position.coords.longitude};nearMeEnabled=true;activeShopSort='nearest';activeShopPage=1;renderShop(new URLSearchParams());const located=activeProducts().filter(p=>Number.isFinite(productDistance(p))).length;if(!located)showToast('Your location is ready, but listings need latitude/longitude coordinates for distance sorting.','warn');else showToast('Near me enabled. Showing listings with location coordinates.');},error=>{showToast(error.code===1?'Location permission was denied. You can still filter by province, district and municipality.':'Could not get your location. Check device location settings.','warn');renderShop(new URLSearchParams());},{enableHighAccuracy:false,timeout:10000,maximumAge:300000});}
-  else if(action==='open-demo-retailer'){navigate('#seller');}
+  else if(action==='open-demo-retailer'){navigate('#partner');}
   else if(action==='seller-new-product'){const user=session();if(user?.role!=='retailer')return showToast('Sign in to the retailer workspace first.','warn');const profile=retailerProfile(user);if(!profile)return renderSellerSetup(user);if(profile.status!=='approved')return renderRetailerVerificationState(user,profile);openProductForm();}
   else if(action==='edit-product'){const p=getProduct(id);if(p&&p.retailerId===session()?.uid)openProductForm(p);else if(p&&session()?.uid==='demo-retailer'&&p.retailerId==='retailer-demo')openProductForm(p);else showToast('You can only edit your own listings.','error');}
   else if(action==='delete-product'){const p=getProduct(id);if(!p)return;const user=session();if(!(p.retailerId===user?.uid||(user?.uid==='demo-retailer'&&p.retailerId==='retailer-demo')))return showToast('You can only remove your own listings.','error');if(!confirm(`Remove “${p.name}” from ${isFirebaseConfigured()?'the marketplace':'your demo catalogue'}?`))return;const saveResult=store.saveProducts(allProducts().filter(x=>x.id!==id));if(isFirebaseConfigured()){showToast('Removing listing…');Promise.resolve(saveResult).then(()=>{renderSellerDashboard();showToast('Listing removed.');}).catch(()=>{});}else{renderSellerDashboard();showToast('Listing removed from this browser.');}}
@@ -1388,7 +1390,7 @@ document.addEventListener('submit',e=>{
   } else if(form.id==='auth-email-form'){
     e.preventDefault();
     const fd=new FormData(form);const email=String(fd.get('email')||'').trim();const password=String(fd.get('password')||'');
-    authRole=String(fd.get('role')||'customer');const remember=document.getElementById('remember-me')?.checked!==false;
+    authRole='customer';const remember=document.getElementById('remember-me')?.checked!==false;
     if(!email||!password)return showToast('Enter your email and password.','warn');
     if(!isFirebaseConfigured())return showToast('Connect Firebase Authentication before creating real accounts.','error');
     const operation=authMode==='signup'?createEmailAccount(email,password,authRole,remember):signInEmail(email,password,authRole,remember);
@@ -1536,7 +1538,7 @@ if(isFirebaseConfigured()) {
     if (next && next.role === 'admin' && getRoute().path !== 'admin') { navigate('#admin'); return; }
     if(next && (['login','seller'].includes(getRoute().path)||authGateActive)){
       authGateActive=false;
-      if(next.role==='retailer')navigate('#seller');
+      if(next.role==='retailer')navigate('#dashboard');
       else if(next.role==='customer')navigate('#shop');
       else navigate('#admin');
       return;
