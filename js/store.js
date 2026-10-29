@@ -9,6 +9,7 @@ const STORAGE_KEYS = {
   breedingBookings: 'pashughar.breedingBookings.v1',
   enquiries: 'pashughar.enquiries.v1',
   vetAppointments: 'pashughar.vetAppointments.v1',
+  appointments: 'pashughar.appointments.v1',
   siteSettings: 'pashughar.siteSettings.v1'
 };
 
@@ -66,7 +67,7 @@ function readJson(key, fallback) {
 function writeJson(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
 function initializeStore() {
   if (!localStorage.getItem(STORAGE_KEYS.products)) writeJson(STORAGE_KEYS.products, SEEDED_PRODUCTS);
-  for (const [key, fallback] of [[STORAGE_KEYS.cart, []],[STORAGE_KEYS.orders, []],[STORAGE_KEYS.wishlist, []],[STORAGE_KEYS.retailers, []],[STORAGE_KEYS.reports, []],[STORAGE_KEYS.breedingBookings, []]]) {
+  for (const [key, fallback] of [[STORAGE_KEYS.cart, []],[STORAGE_KEYS.orders, []],[STORAGE_KEYS.wishlist, []],[STORAGE_KEYS.retailers, []],[STORAGE_KEYS.reports, []],[STORAGE_KEYS.breedingBookings, []],[STORAGE_KEYS.appointments, []]]) {
     if (!localStorage.getItem(key)) writeJson(key, fallback);
   }
 }
@@ -100,6 +101,8 @@ export const store = {
   saveBreedingBookings: (items) => writeJson(STORAGE_KEYS.breedingBookings, items),
   enquiries: () => readJson(STORAGE_KEYS.enquiries, []),
   vetAppointments: () => readJson(STORAGE_KEYS.vetAppointments, []),
+  appointments: () => readJson(STORAGE_KEYS.appointments, []),
+  saveAppointments: (items) => writeJson(STORAGE_KEYS.appointments, Array.isArray(items) ? items : []),
   siteSettings: () => ({...DEFAULT_SITE_SETTINGS, ...readJson(STORAGE_KEYS.siteSettings, {})}),
   saveVetAppointments: (items) => writeJson(STORAGE_KEYS.vetAppointments, Array.isArray(items) ? items : []),
   saveEnquiries: (items) => { const previous=readJson(STORAGE_KEYS.enquiries,[]); const next=Array.isArray(items)?items:[]; writeJson(STORAGE_KEYS.enquiries,next); return persistCloud('enquiries',previous,next); },
@@ -148,7 +151,7 @@ export const safe = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&'
 
 // Cloud snapshots update the local cache without triggering write-back loops.
 export function hydrateCollection(name, items) {
-  const key = ({ products: STORAGE_KEYS.products, retailers: STORAGE_KEYS.retailers, orders: STORAGE_KEYS.orders, reports: STORAGE_KEYS.reports, breedingBookings: STORAGE_KEYS.breedingBookings, enquiries: STORAGE_KEYS.enquiries, vetAppointments: STORAGE_KEYS.vetAppointments })[name];
+  const key = ({ products: STORAGE_KEYS.products, retailers: STORAGE_KEYS.retailers, orders: STORAGE_KEYS.orders, reports: STORAGE_KEYS.reports, breedingBookings: STORAGE_KEYS.breedingBookings, enquiries: STORAGE_KEYS.enquiries, vetAppointments: STORAGE_KEYS.vetAppointments, appointments: STORAGE_KEYS.appointments })[name];
   if (!key) throw new Error(`Unknown cache collection: ${name}`);
   writeJson(key, Array.isArray(items) ? items : []);
   try { window.dispatchEvent(new CustomEvent('pashughar:cloud-updated', { detail: { name, count: Array.isArray(items) ? items.length : 0 } })); } catch {}
