@@ -13,6 +13,34 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "vetAppointmentSlots",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "vetId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "date",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "messages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "message",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "senderRole",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []

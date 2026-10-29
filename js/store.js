@@ -7,10 +7,39 @@ const STORAGE_KEYS = {
   retailers: 'pashughar.retailers.v1',
   reports: 'pashughar.reports.v1',
   breedingBookings: 'pashughar.breedingBookings.v1',
-  enquiries: 'pashughar.enquiries.v1'
+  enquiries: 'pashughar.enquiries.v1',
+  vetAppointments: 'pashughar.vetAppointments.v1',
+  siteSettings: 'pashughar.siteSettings.v1'
 };
 
+const DEFAULT_SITE_SETTINGS = {
+  announcementEnabled: true,
+  announcementText: 'Pashughar — a marketplace built for Nepal',
+  bannerTitle: 'Everything for animals, all in one place.',
+  bannerText: 'Discover livestock, fresh meat, pets, pet essentials and animal products from local retailers.',
+  bannerImage: '',
+  deliveryCharge: 0,
+  commissionPercent: 0
+};
 let persistenceAdapter = null;
+export const hydrateSiteSettings = value => {
+  const next = {...DEFAULT_SITE_SETTINGS, ...(value && typeof value === 'object' ? value : {})};
+  writeJson(STORAGE_KEYS.siteSettings, next);
+  try { window.dispatchEvent(new CustomEvent('pashughar:site-settings', {detail:next})); } catch {}
+};
+export const hydrateCategories = records => {
+  const base = typeof BUILT_IN_CATEGORIES !== 'undefined' ? BUILT_IN_CATEGORIES : CATEGORIES;
+  const merged = new Map(base.map(category => [category.id, {...category, palette:{...(category.palette||{})}}]));
+  if (Array.isArray(records)) {
+    for (const record of records) {
+      if (!record || typeof record.id !== 'string' || !record.id) continue;
+      const previous = merged.get(record.id) || {};
+      merged.set(record.id, {...previous, ...record, palette:{...(previous.palette||{}), ...(record.palette||{})}});
+    }
+  }
+  CATEGORIES.splice(0, CATEGORIES.length, ...merged.values());
+  try { window.dispatchEvent(new CustomEvent('pashughar:categories', {detail:{count:CATEGORIES.length}})); } catch {}
+};
 export const configurePersistenceAdapter = adapter => { persistenceAdapter = adapter || null; };
 const persistCloud = (type, previous, next) => {
   if (!persistenceAdapter || typeof persistenceAdapter[type] !== 'function') return Promise.resolve();
@@ -70,6 +99,9 @@ export const store = {
   breedingBookings: () => readJson(STORAGE_KEYS.breedingBookings, []),
   saveBreedingBookings: (items) => writeJson(STORAGE_KEYS.breedingBookings, items),
   enquiries: () => readJson(STORAGE_KEYS.enquiries, []),
+  vetAppointments: () => readJson(STORAGE_KEYS.vetAppointments, []),
+  siteSettings: () => ({...DEFAULT_SITE_SETTINGS, ...readJson(STORAGE_KEYS.siteSettings, {})}),
+  saveVetAppointments: (items) => writeJson(STORAGE_KEYS.vetAppointments, Array.isArray(items) ? items : []),
   saveEnquiries: (items) => { const previous=readJson(STORAGE_KEYS.enquiries,[]); const next=Array.isArray(items)?items:[]; writeJson(STORAGE_KEYS.enquiries,next); return persistCloud('enquiries',previous,next); },
   resetDemo: () => { Object.values(STORAGE_KEYS).forEach(k => localStorage.removeItem(k)); initializeStore(); }
 };
@@ -107,6 +139,7 @@ export const CATEGORIES = [
     palette:{accent:'#769382',deep:'#304E40',wash:'#EAF0EA',soft:'#F3EFE3',warm:'#C0C3B9',contrast:'#536C5D'}
   }
 ];
+const BUILT_IN_CATEGORIES = CATEGORIES.map(category => ({...category, palette:{...(category.palette||{})}}));
 export const normalizeCategoryId = id => ({pets:'pets-supplies','pet-supplies':'pets-supplies'}[String(id||'')] || String(id||''));
 export const money = (amount) => new Intl.NumberFormat('en-NP',{style:'currency',currency:'NPR',maximumFractionDigits:0}).format(Number(amount)||0);
 export const categoryName = id => CATEGORIES.find(c=>c.id===normalizeCategoryId(id))?.name || 'Other';
@@ -115,7 +148,7 @@ export const safe = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&'
 
 // Cloud snapshots update the local cache without triggering write-back loops.
 export function hydrateCollection(name, items) {
-  const key = ({ products: STORAGE_KEYS.products, retailers: STORAGE_KEYS.retailers, orders: STORAGE_KEYS.orders, reports: STORAGE_KEYS.reports, breedingBookings: STORAGE_KEYS.breedingBookings, enquiries: STORAGE_KEYS.enquiries })[name];
+  const key = ({ products: STORAGE_KEYS.products, retailers: STORAGE_KEYS.retailers, orders: STORAGE_KEYS.orders, reports: STORAGE_KEYS.reports, breedingBookings: STORAGE_KEYS.breedingBookings, enquiries: STORAGE_KEYS.enquiries, vetAppointments: STORAGE_KEYS.vetAppointments })[name];
   if (!key) throw new Error(`Unknown cache collection: ${name}`);
   writeJson(key, Array.isArray(items) ? items : []);
   try { window.dispatchEvent(new CustomEvent('pashughar:cloud-updated', { detail: { name, count: Array.isArray(items) ? items.length : 0 } })); } catch {}

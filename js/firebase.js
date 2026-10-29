@@ -15,7 +15,7 @@ import {
   setDoc, updateDoc, deleteDoc, getDocs, writeBatch, serverTimestamp, deleteField
 } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js';
 import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-functions.js';
-import { store, configurePersistenceAdapter, hydrateCollection } from './store.js';
+import { store, configurePersistenceAdapter, hydrateCollection, hydrateCategories, hydrateSiteSettings } from './store.js';
 
 export const firebaseConfig = {
   apiKey: 'AIzaSyBDpG4pEd4bv3yQGB8nSjeKRwMtNJ4DILs',
@@ -450,6 +450,8 @@ export function startFirebaseBridge({ onSessionChanged }) {
     ownProducts = [];
     const q = query(collection(db, 'products'), where('status', '==', 'approved'));
     listen(q, snapshot => { publicProducts = unpack(snapshot); mergeProducts(); });
+    listen(collection(db, 'categories'), snapshot => hydrateCategories(unpack(snapshot)));
+    listen(doc(db, 'platformSettings', 'public'), snapshot => hydrateSiteSettings(snapshot.exists() ? toPlain(snapshot.data()) : {}));
     hydrateCollection('retailers', []);
     hydrateCollection('reports', []);
     hydrateCollection('orders', []);
@@ -466,6 +468,7 @@ export function startFirebaseBridge({ onSessionChanged }) {
     });
     listen(query(collection(db, 'breedingBookings'), where('retailerId', '==', uid)), snapshot => hydrateCollection('breedingBookings', unpack(snapshot)));
     listen(query(collection(db, 'enquiries'), where('retailerId', '==', uid)), snapshot => hydrateCollection('enquiries', unpack(snapshot)));
+    listen(query(collection(db, 'vetAppointments'), where('vetId', '==', uid)), snapshot => hydrateCollection('vetAppointments', unpack(snapshot)));
     listen(query(collection(db, 'retailerOrders'), where('retailerId', '==', uid)), snapshot => {
       ownRetailerOrderDocs = unpack(snapshot);
       const orders = ownRetailerOrderDocs.map(order => ({
@@ -489,6 +492,7 @@ export function startFirebaseBridge({ onSessionChanged }) {
     listen(collection(db, 'reports'), snapshot => hydrateCollection('reports', unpack(snapshot)));
     listen(collection(db, 'breedingBookings'), snapshot => hydrateCollection('breedingBookings', unpack(snapshot)));
     listen(collection(db, 'enquiries'), snapshot => hydrateCollection('enquiries', unpack(snapshot)));
+    listen(collection(db, 'vetAppointments'), snapshot => hydrateCollection('vetAppointments', unpack(snapshot)));
   };
 
   const unsubscribeAuth = onAuthStateChanged(auth, async user => {
@@ -503,6 +507,8 @@ export function startFirebaseBridge({ onSessionChanged }) {
       hydrateCollection('orders', []);
       hydrateCollection('breedingBookings', []);
       hydrateCollection('enquiries', []);
+      hydrateCollection('vetAppointments', []);
+      store.saveWishlist([]);
       startPublicData();
       onSessionChanged(null);
       return;
@@ -539,6 +545,7 @@ export function startFirebaseBridge({ onSessionChanged }) {
       return;
     }
     startPublicData();
+    listen(doc(db, 'wishlists', user.uid), snapshot => store.saveWishlist(snapshot.exists() ? (snapshot.data().productIds || []) : []));
     if (session.role === 'retailer') startRetailerData(user.uid);
   });
   return () => { stopDataListeners(); unsubscribeAuth(); };

@@ -1,11 +1,16 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function signedIn() { return request.auth != null; }
-    function isAdmin() { return signedIn() && request.auth.token.admin == true; }
-    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
     function retailerPath(uid) { return /databases/$(database)/documents/retailers/$(uid); }
     function userPath(uid) { return /databases/$(database)/documents/users/$(uid); }
+    function signedIn() {
+      return request.auth != null
+        && (!exists(userPath(request.auth.uid))
+          || !('adminStatus' in get(userPath(request.auth.uid)).data)
+          || get(userPath(request.auth.uid)).data.adminStatus == 'active');
+    }
+    function isAdmin() { return signedIn() && request.auth.token.admin == true; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
     function hasRetailerRole() {
       return signedIn() && exists(userPath(request.auth.uid))
         && get(userPath(request.auth.uid)).data.role == 'retailer';
@@ -82,6 +87,11 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow create, update, delete: if false; // Admin category mutations use trusted callable functions.
+    }
+
     match /products/{productId} {
       // Public catalogue query filters on status == 'approved'. Firestore Rules are not
       // filters, so keep the public read condition query-provable. Only verified retailers
@@ -92,14 +102,16 @@ service cloud.firestore {
         || resource.data.status == 'approved';
       allow create: if isVerifiedRetailer()
         && request.resource.data.retailerId == request.auth.uid
-        && request.resource.data.status == 'approved'
+        && request.resource.data.status == 'pending'
         && validProduct(request.resource.data)
         && request.resource.data.keys().hasOnly(['name','category','condition','description','price','unit','stock','location','image','images','videoUrls','attributes','retailer','retailerId','status','createdAt','updatedAt']);
       allow update: if isAdmin() || (isVerifiedRetailer()
         && resource.data.retailerId == request.auth.uid
         && request.resource.data.retailerId == resource.data.retailerId
-        && (request.resource.data.status == resource.data.status || request.resource.data.status in ['approved','paused'])
-        && resource.data.status in ['approved','paused']
+        && (request.resource.data.status == resource.data.status
+          || request.resource.data.status == 'pending'
+          || (resource.data.status == 'approved' && request.resource.data.status == 'paused'))
+        && resource.data.status in ['approved','paused','pending','rejected']
         && validProduct(request.resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','category','condition','description','price','unit','stock','location','image','images','attributes','videoUrls','retailer','status','updatedAt']));
       allow delete: if isAdmin() || (isVerifiedRetailer() && resource.data.retailerId == request.auth.uid);
@@ -234,8 +246,40 @@ service cloud.firestore {
         && request.resource.data.createdAt is timestamp;
       allow update, delete: if isAdmin();
     }
-    match /wishlists/{userId} { allow read, write: if isOwner(userId); }
-    match /platformSettings/{settingId} { allow read: if signedIn(); allow write: if isAdmin(); }
+    match /wishlists/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && request.resource.data.keys().hasOnly(['productIds','updatedAt']) && request.resource.data.productIds is list && request.resource.data.productIds.size() <= 300;
+      allow delete: if isOwner(userId);
+    }
+    match /notifications/{notificationId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
+      allow create, delete: if false;
+      allow update: if signedIn() && resource.data.userId == request.auth.uid && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read','readAt']) && request.resource.data.read == true;
+    }
+    // Appointment records and slot locks are written through trusted callables so slot uniqueness cannot be bypassed.
+    match /vetAppointments/{appointmentId} {
+      allow read: if isAdmin() || (signedIn() && (resource.data.customerUid == request.auth.uid || resource.data.vetId == request.auth.uid));
+      allow create, update, delete: if false;
+    }
+    match /vetAppointmentSlots/{slotId} {
+      allow read, write: if false;
+    }
+    match /enquiries/{enquiryId}/messages/{messageId} {
+      allow read: if signedIn() && exists(/databases/$(database)/documents/enquiries/$(enquiryId))
+        && (get(/databases/$(database)/documents/enquiries/$(enquiryId)).data.customerUid == request.auth.uid
+          || get(/databases/$(database)/documents/enquiries/$(enquiryId)).data.retailerId == request.auth.uid || isAdmin());
+      allow create: if hasVerifiedContact()
+        && request.resource.data.keys().hasOnly(['message','senderUid','senderRole','createdAt'])
+        && exists(/databases/$(database)/documents/enquiries/$(enquiryId))
+        && request.resource.data.senderUid == request.auth.uid
+        && request.resource.data.message is string && request.resource.data.message.size() >= 2 && request.resource.data.message.size() <= 1500
+        && request.resource.data.createdAt == request.time
+        && ((get(/databases/$(database)/documents/enquiries/$(enquiryId)).data.customerUid == request.auth.uid && request.resource.data.senderRole == 'customer')
+          || (get(/databases/$(database)/documents/enquiries/$(enquiryId)).data.retailerId == request.auth.uid && request.resource.data.senderRole == 'retailer' && isVerifiedRetailer()));
+      allow update, delete: if false;
+    }
+    match /newsletterSubscribers/{subscriberId} { allow read, write: if false; }
+    match /platformSettings/{settingId} { allow read: if settingId == 'public' || signedIn(); allow write: if isAdmin(); }
     match /auditLogs/{logId} { allow read: if isAdmin(); allow write: if false; }
   }
 }
