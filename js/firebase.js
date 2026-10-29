@@ -389,7 +389,7 @@ export async function moderateRetailerDirect({ retailerId, decision, reason = ''
 
 export async function moderateProductDirect({ productId, decision, reason = '' }) {
   const user = await requireCurrentAdmin();
-  if (!productId || !['approved', 'suspended'].includes(decision)) throw new Error('Invalid product moderation request.');
+  if (!productId || !['approved', 'rejected', 'suspended'].includes(decision)) throw new Error('Invalid product moderation request.');
   const ref = doc(db, 'products', productId);
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error('Product not found.');
