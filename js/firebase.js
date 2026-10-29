@@ -1,7 +1,7 @@
 /* Pashughar Firebase client integration.
  * This file contains only the public web-app configuration. Never put service-account
  * credentials, payment secrets, or privileged Admin SDK keys in browser code.
- * Firebase Storage is intentionally not initialized or used in this version.
+ * Certificate and listing-photo uploads use per-user paths governed by storage.rules.
  */
 import { initializeApp, getApps } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js';
 import {
@@ -12,8 +12,9 @@ import {
 } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-auth.js';
 import {
   getFirestore, collection, doc, getDoc, onSnapshot, query, where, addDoc,
-  setDoc, updateDoc, deleteDoc, getDocs, writeBatch, serverTimestamp, deleteField
+  setDoc, updateDoc, deleteDoc, getDocs, writeBatch, serverTimestamp, deleteField, runTransaction
 } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-firestore.js';
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-storage.js';
 import { getFunctions, httpsCallable } from 'https://www.gstatic.com/firebasejs/13.1.0/firebase-functions.js';
 import { store, configurePersistenceAdapter, hydrateCollection, hydrateCategories, hydrateSiteSettings } from './store.js';
 
@@ -34,6 +35,7 @@ export const isFirebaseConfigured = () => Boolean(
 const firebaseApp = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 export const auth = getAuth(firebaseApp);
 export const db = getFirestore(firebaseApp);
+export const storage = getStorage(firebaseApp);
 // The included functions scaffold uses this region. Deploying callable functions may require
 // upgrading the Firebase project to the Blaze plan; the client does not upgrade billing.
 export const functions = getFunctions(firebaseApp, 'asia-south2');
@@ -135,8 +137,159 @@ export async function confirmPhoneOtp(code, role = 'customer') {
   return {...confirmation, pashugharRole: profile.role || role};
 }
 export const isVerifiedContact = user => Boolean(user && (user.emailVerified === true || (typeof user.phoneNumber === 'string' && user.phoneNumber.length > 0)));
+
 export const signOutUser = () => signOut(auth);
 export const getCallable = name => httpsCallable(functions, name);
+
+const RETAILER_TYPES = new Set(['meat_poultry','livestock','animal_products','pets_supplies','pet_breeding','vet']);
+const cleanField = (value, max = 500) => String(value ?? '').trim().slice(0, max);
+const asList = (value, maxItems = 30, maxLen = 180) => String(value ?? '').split(/[,\n]/).map(v => cleanField(v,maxLen)).filter(Boolean).slice(0,maxItems);
+const validHttps = value => { try { return new URL(String(value || '')).protocol === 'https:'; } catch { return false; } };
+
+/** Create the retailer profile and one-time retailerType/status on the user's own account.
+ * Firestore Rules restrict this to a self-owned, not-yet-applied retailer account. */
+export async function submitRetailerApplication(input = {}) {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sign in or finish account registration before submitting your partner application.');
+  const type = cleanField(input.retailerType, 40);
+  if (!RETAILER_TYPES.has(type)) throw new Error('Choose one valid retailer type.');
+  const storeName = cleanField(input.storeName, 100);
+  const contactName = cleanField(input.contactName, 100);
+  const phone = cleanField(input.phone || user.phoneNumber, 40);
+  const email = cleanField(input.email || user.email, 254).toLowerCase();
+  const location = cleanField(input.location, 220);
+  const description = cleanField(input.description, 700);
+  if (!storeName || !contactName || !phone || !location) throw new Error('Complete your name, business/owner name, phone and location.');
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Enter a valid email address.');
+  let vetDetails = {};
+  if (type === 'vet') {
+    const year = Number(input.graduationYear), certificateUrl = cleanField(input.certificateUrl,2048);
+    if (!cleanField(input.degree,100) || !cleanField(input.university,180)
+      || !Number.isInteger(year) || year < 1950 || year > new Date().getFullYear()
+      || !cleanField(input.councilRegistrationNumber,120) || !cleanField(input.workExperience,1000)
+      || !asList(input.clinicLocations,20,220).length || !asList(input.services,30,180).length
+      || !cleanField(input.fees,500) || !cleanField(input.availability,700) || !validHttps(certificateUrl)) {
+      throw new Error('Complete the vet qualification, registration, certificate upload/URL, experience, clinic locations, services, fees and availability.');
+    }
+    vetDetails = {
+      degree:cleanField(input.degree,100), university:cleanField(input.university,180), graduationYear:year,
+      councilRegistrationNumber:cleanField(input.councilRegistrationNumber,120), certificateUrl,
+      workExperience:cleanField(input.workExperience,1000), clinicLocations:asList(input.clinicLocations,20,220),
+      services:asList(input.services,30,180), fees:cleanField(input.fees,500), availability:cleanField(input.availability,700)
+    };
+  }
+  const breedingDetails = type === 'pet_breeding' ? {
+    ownerInfo:cleanField(input.ownerInfo || contactName,500), location,
+    animalsNote:cleanField(input.animalsNote,700)
+  } : {};
+  const userRef = doc(db,'users',user.uid), retailerRef = doc(db,'retailers',user.uid);
+  await runTransaction(db, async tx => {
+    const [userSnap,retailerSnap] = await Promise.all([tx.get(userRef),tx.get(retailerRef)]);
+    if (!userSnap.exists() || userSnap.data().role !== 'retailer') {
+      throw new Error('This is not a retailer account. Start from the Become a partner registration flow.');
+    }
+    const existing = userSnap.data();
+    if (retailerSnap.exists() || existing.retailerType || existing.status) {
+      throw new Error('A retailer application already exists. Retailer type cannot be changed in the application form.');
+    }
+    tx.update(userRef,{displayName:contactName,phone,retailerType:type,status:'pending',updatedAt:serverTimestamp()});
+    tx.set(retailerRef,{
+      ownerId:user.uid,retailerType:type,storeName,contactName,email,phone,location,description,status:'pending',
+      publicPhone:phone,publicEmail:email,website:'',openingHours:'',vetDetails,breedingDetails,
+      createdAt:serverTimestamp(),updatedAt:serverTimestamp()
+    });
+  });
+  return {uid:user.uid,role:'retailer',retailerType:type,status:'pending'};
+}
+
+/** Upload a certificate or product photo to a UID-scoped Firebase Storage path. */
+export async function uploadRetailerFile(file, purpose = 'product') {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sign in before uploading files.');
+  if (!file || typeof file.size !== 'number') throw new Error('Choose a file to upload.');
+  const certificate = purpose === 'certificate';
+  const maxBytes = certificate ? 10*1024*1024 : 8*1024*1024;
+  const allowed = certificate ? ['application/pdf','image/jpeg','image/png','image/webp'] : ['image/jpeg','image/png','image/webp','image/avif'];
+  if (file.size <= 0 || file.size > maxBytes) throw new Error('File is empty or exceeds the '+(certificate?'10 MB':'8 MB')+' upload limit.');
+  if (!allowed.includes(String(file.type||'').toLowerCase())) throw new Error(certificate?'Upload a PDF, JPEG, PNG or WebP certificate.':'Upload a JPEG, PNG, WebP or AVIF image.');
+  const safeName = String(file.name||'upload').toLowerCase().replace(/[^a-z0-9._-]+/g,'-').slice(-100) || 'upload';
+  const path = (certificate?'retailer-certificates':'product-photos')+'/'+user.uid+'/'+Date.now()+'-'+safeName;
+  const target = storageRef(storage,path);
+  await uploadBytes(target,file,{contentType:file.type,customMetadata:{ownerUid:user.uid,purpose:certificate?'vet-certificate':'listing-photo'}});
+  return getDownloadURL(target);
+}
+
+/** Shared appointment records for veterinary visits and breeding appointments. */
+export async function createMarketplaceAppointment(input = {}) {
+  const user = auth.currentUser;
+  if (!user) throw new Error('Sign in as a customer before booking an appointment.');
+  const customerProfile = await getDoc(doc(db,'users',user.uid));
+  if (!customerProfile.exists() || customerProfile.data().role !== 'customer') throw new Error('Only customer accounts can book appointments.');
+  const appointmentType = input.appointmentType === 'breeding' ? 'breeding' : 'vet';
+  const retailerId = cleanField(input.retailerId,160), date = cleanField(input.date,10), time = cleanField(input.time,5);
+  const customerName = cleanField(input.customerName || user.displayName || user.email?.split('@')[0],120);
+  const customerPhone = cleanField(input.customerPhone || user.phoneNumber,40);
+  const reason = cleanField(input.reason,1000), location = cleanField(input.location,220);
+  if (!retailerId || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time) || !customerName || !customerPhone || reason.length < 5) {
+    throw new Error('Complete your contact details, a future date/time and appointment reason.');
+  }
+  const start = new Date(date+'T'+time+':00');
+  if (!Number.isFinite(start.getTime()) || start <= new Date()) throw new Error('Choose a future date and time.');
+  let providerName = cleanField(input.retailerName,120), productId = '', productName = cleanField(input.productName,160);
+  if (appointmentType === 'breeding') {
+    productId = cleanField(input.productId,160);
+    if (!productId) throw new Error('Choose an animal listing for the breeding appointment.');
+    const productSnap = await getDoc(doc(db,'products',productId));
+    if (!productSnap.exists()) throw new Error('The animal listing is no longer available.');
+    const product = productSnap.data();
+    if (product.status !== 'approved' || product.category !== 'pets-supplies' || product.attributes?.petSection !== 'breeding' || product.retailerId !== retailerId) throw new Error('This animal is not available for appointment requests.');
+    providerName = cleanField(product.retailer || providerName,120);
+    productName = cleanField(product.name || productName,160);
+  } else {
+    const provider = await getDoc(doc(db,'retailers',retailerId));
+    if (!provider.exists() || provider.data().retailerType !== 'vet' || provider.data().status !== 'approved') throw new Error('This veterinary provider is not currently approved.');
+    providerName = cleanField(provider.data().storeName || providerName,120);
+  }
+  const payload = {
+    appointmentType,customerUid:user.uid,customerName,customerPhone,customerEmail:user.email||'',
+    retailerId,retailerName:providerName,date,time,reason,location,status:'pending',
+    createdAt:serverTimestamp(),updatedAt:serverTimestamp()
+  };
+  if (productId) { payload.productId=productId; payload.productName=productName; }
+  return addDoc(collection(db,'appointments'),payload);
+}
+export async function updateMarketplaceAppointment({appointmentId,action,date='',time='',reason=''}) {
+  const user=auth.currentUser;
+  if(!user||!appointmentId)throw new Error('Sign in to update this appointment.');
+  const updates={updatedAt:serverTimestamp()};
+  if(action==='confirm')updates.status='confirmed';
+  else if(action==='reject'){updates.status='rejected';updates.statusReason=cleanField(reason,500);}
+  else if(action==='reschedule'){
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)||new Date(date+'T'+time+':00')<=new Date())throw new Error('Choose a future date and time for the reschedule.');
+    updates.status='reschedule_requested';updates.proposedDate=date;updates.proposedTime=time;updates.statusReason=cleanField(reason,500);
+  } else if(action==='cancel')updates.status='cancelled';
+  else if(action==='complete')updates.status='completed';
+  else throw new Error('Unknown appointment action.');
+  return updateDoc(doc(db,'appointments',appointmentId),updates);
+}
+export async function createMarketplaceReport({product,reason,details,reporterName='',reporterContact=''}) {
+  const user=auth.currentUser;
+  if(!user)throw new Error('Sign in to submit a marketplace report.');
+  if(!product?.id||!['suspected-scam','misleading-listing','fake-product','non-delivery','animal-welfare','prohibited-item','other'].includes(reason)||String(details||'').trim().length<10)throw new Error('Choose a report reason and provide at least 10 characters of detail.');
+  return addDoc(collection(db,'reports'),{
+    productId:String(product.id),productName:cleanField(product.name,160),retailerId:cleanField(product.retailerId,160),
+    retailerName:cleanField(product.retailer,160),location:cleanField(product.location,220),category:cleanField(product.category,80),
+    reason,reasonLabel:reason,details:cleanField(details,1800),reporterUid:user.uid,
+    reporterName:cleanField(reporterName||user.displayName||user.email?.split('@')[0],100),
+    reporterContact:cleanField(reporterContact||user.email||user.phoneNumber,180),
+    status:'open',createdAt:serverTimestamp(),updatedAt:serverTimestamp()
+  });
+}
+export async function updateMarketplaceReport({reportId,status,resolutionNote=''}) {
+  await requireCurrentAdmin();
+  if(!reportId||!['reviewing','resolved','dismissed'].includes(status))throw new Error('Choose a valid report status.');
+  return updateDoc(doc(db,'reports',reportId),{status,resolutionNote:cleanField(resolutionNote,500),reviewedBy:auth.currentUser.uid,updatedAt:serverTimestamp()});
+}
 export async function updateRetailerOrderStatusDirect({retailerOrderId,status}) {
   const user=auth.currentUser;
   if(!user)throw new Error('Sign in as the assigned retailer first.');
