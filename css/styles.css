@@ -183,7 +183,7 @@ body[data-theme="dark"] .verification-card,body[data-theme="dark"] .report-card{
 .route-breadcrumbs a:hover{color:var(--accent)}
 .route-breadcrumbs strong{color:var(--ink);font-weight:750}
 .mobile-tab-bar{display:none}
-.back-to-top{position:fixed;right:22px;bottom:24px;z-index:1100;display:grid;place-items:center;width:46px;height:46px;border:1px solid var(--line);border-radius:50%;background:var(--paper);color:var(--ink);font-size:23px;font-weight:800;box-shadow:0 8px 28px #13271d24;opacity:0;visibility:hidden;transform:translateY(8px);transition:opacity .2s,transform .2s,visibility .2s;cursor:pointer}
+.back-to-top{position:fixed;right:22px;bottom:24px;z-index:1100;display:grid!important;place-items:center;width:46px;height:46px;border:1px solid var(--line);border-radius:50%;background:var(--paper);color:var(--ink);font-size:23px;font-weight:800;box-shadow:0 8px 28px #13271d24;opacity:0;visibility:hidden;transform:translateY(8px);transition:opacity .2s,transform .2s,visibility .2s;cursor:pointer}
 .back-to-top.visible{opacity:1;visibility:visible;transform:translateY(0)}
 @media(max-width:800px){
  .site-header{top:0}
