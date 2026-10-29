@@ -1,7 +1,7 @@
 import {store, CATEGORIES, money, categoryName, normalizeCategoryId, slugId, safe, hydrateCollection} from './store.js';
 import {renderCustomerFeature, installCustomerFeatureHandlers, toggleCloudWishlist, watchChatThreads} from './customer-features.js';
 import {renderAdminFeature, installAdminFeatureHandlers, renderAdminProductForm, saveAdminProductFromForm} from './admin-features.js';
-import {isFirebaseConfigured, signInGoogle, signInEmail, createEmailAccount, resetEmailPassword, signOutUser, sendVerificationEmail, refreshAuthUser, sendPhoneOtp, confirmPhoneOtp, isVerifiedContact, setRememberMe, startFirebaseBridge, getCallable, moderateRetailerDirect, moderateProductDirect, removeProductDirect, createBreedingBooking, updateBreedingBookingStatus, createProductEnquiry, replyToEnquiry, getPublicStoreProfile, updateRetailerOrderStatusDirect, getPublishedProductReviews, submitProductReview} from './firebase.js';
+import {isFirebaseConfigured, signInGoogle, signInEmail, createEmailAccount, resetEmailPassword, signOutUser, sendVerificationEmail, refreshAuthUser, sendPhoneOtp, confirmPhoneOtp, isVerifiedContact, setRememberMe, startFirebaseBridge, getCallable, moderateRetailerDirect, moderateProductDirect, removeProductDirect, createBreedingBooking, updateBreedingBookingStatus, createProductEnquiry, replyToEnquiry, getPublicStoreProfile, updateRetailerOrderStatusDirect, getPublishedProductReviews, submitProductReview, submitRetailerApplication, uploadRetailerFile, createMarketplaceAppointment, updateMarketplaceAppointment, createMarketplaceReport, updateMarketplaceReport} from './firebase.js';
 
 store.init();
 // In Firebase mode, never briefly display fictional sample catalogue/dashboard data while
@@ -52,6 +52,8 @@ let authGateActive = false;
 let authStateReady = !isFirebaseConfigured();
 let phoneDraft = '';
 let phoneOtpSent = false;
+let partnerApplicationDraft = {};
+let partnerOtpSent = false;
 let rememberAuthSession = true;
 let checkoutOtpSent = false;
 let verifiedCheckoutPhone = '';
@@ -290,6 +292,108 @@ function renderRetailerLogin() {
     footnote: isFirebaseConfigured() ? 'Your password is handled by Firebase Authentication. Pashughar never asks for your Google password. Shop approval is separate from account creation.' : '<strong>Demo mode:</strong> Retailer ID <code>retailer</code> · Password <code>retailer</code>.'
   });
 }
+
+const RETAILER_TYPE_LABELS = {
+  meat_poultry:'Meat & poultry', livestock:'Livestock', animal_products:'Animal products',
+  pets_supplies:'Pets & supplies', pet_breeding:'Pet breeding', vet:'Veterinary clinic / professional'
+};
+const RETAILER_CATEGORY = {
+  meat_poultry:'meat', livestock:'livestock', animal_products:'animal-products',
+  pets_supplies:'pets-supplies', pet_breeding:'pets-supplies', vet:'animal-care'
+};
+function retailerTypeLabel(type){return RETAILER_TYPE_LABELS[type]||'Retailer';}
+function renderPartnerWaiting(user,profile={}) {
+  const status=profile.status||user?.status||'pending';
+  const approved=status==='approved';
+  const blocked=['suspended','banned'].includes(status);
+  const title=approved?'Your partner account is approved':blocked?'Partner access is paused':status==='rejected'?'Application not approved':'Your application is awaiting review';
+  const description=approved?'Your account is approved. Open the retailer dashboard to manage your listings and inbox.':blocked?'Your partner account is paused. Contact Pashughar support if you believe this is an error.':status==='rejected'?'Your application was not approved. Review the administrator’s reason below or contact Pashughar support.':'Pashughar is reviewing your application. Your retailer dashboard and listing tools stay locked until an administrator approves it.';
+  app.innerHTML='<div class="page-wrap"><div class="container"><section class="verification-card"><div class="verification-symbol">'+(approved?'✓':blocked?'!':'◷')+'</div><div class="eyebrow">Pashughar partner application</div><h1>'+safe(title)+'</h1><p>'+safe(description)+'</p><div class="verification-details"><div><span>Business / owner</span><strong>'+safe(profile.storeName||user?.storeName||'Partner application')+'</strong></div><div><span>Account type</span><strong>'+safe(retailerTypeLabel(profile.retailerType||user?.retailerType))+'</strong></div><div><span>Contact</span><strong>'+safe(profile.email||user?.email||user?.phoneNumber||'—')+'</strong></div><div><span>Status</span><strong><span class="status-pill '+statusClass(status)+'">'+safe(shopStatusLabel(status))+'</span></strong></div></div>'+(profile.statusReason?'<div class="notice notice-warn"><strong>Administrator note</strong><p>'+safe(profile.statusReason)+'</p></div>':'')+'<div class="hero-actions" style="justify-content:center">'+(approved?'<a class="button button-primary" href="#dashboard">Open retailer dashboard →</a>':'<a class="button button-secondary" href="#home">Return to shopping</a>')+'<button class="button button-secondary" type="button" data-action="signout">Sign out</button></div></section></div></div>';
+}
+function renderPartnerRegistration() {
+  const user=session();
+  const existing=user?.role==='retailer'?retailerProfile(user):null;
+  if(user?.role==='admin'){
+    app.innerHTML='<div class="page-wrap"><div class="container"><div class="panel-card"><h1>Administrator account</h1><p>Administrator accounts cannot apply for a retailer role.</p><a class="button button-primary" href="#admin">Open admin dashboard</a></div></div></div>';return;
+  }
+  if(user?.role==='customer'){
+    app.innerHTML='<div class="page-wrap"><div class="container"><div class="panel-card"><h1>Become a Pashughar partner</h1><p>You are currently signed in as a customer. Sign out, then create a separate partner account. Customer accounts cannot create listings.</p><button class="button button-primary" type="button" data-action="signout">Sign out to continue</button></div></div></div>';return;
+  }
+  if(existing){if(existing.status==='approved'){navigate('#dashboard');return;}renderPartnerWaiting(user,existing);return;}
+  if(!isFirebaseConfigured()){
+    app.innerHTML='<div class="page-wrap"><div class="container"><div class="panel-card"><h1>Partner registration requires Firebase</h1><p>Configure Firebase Authentication and Firestore before creating real retailer accounts. Demo mode cannot create production partner applications.</p></div></div></div>';return;
+  }
+  const d=partnerApplicationDraft||{};
+  const value=(key,fallback='')=>safe(d[key]??fallback);
+  const select=(name,label,options)=>'<div class="field"><label for="partner-'+name+'">'+label+'</label><select id="partner-'+name+'" name="'+name+'" required>'+options.map(([v,l])=>'<option value="'+v+'" '+(String(d[name]||'')===v?'selected':'')+'>'+l+'</option>').join('')+'</select></div>';
+  const field=(name,label,attrs='')=>'<div class="field"><label for="partner-'+name+'">'+label+'</label><input id="partner-'+name+'" name="'+name+'" '+attrs+' value="'+value(name)+'"></div>';
+  const textarea=(name,label,attrs='')=>'<div class="field"><label for="partner-'+name+'">'+label+'</label><textarea id="partner-'+name+'" name="'+name+'" '+attrs+'>'+value(name)+'</textarea></div>';
+  const isExistingRetailer=user?.role==='retailer';
+  const typeOptions=Object.entries(RETAILER_TYPE_LABELS).map(([v,l])=>[v,l]);
+  const accountFields=isExistingRetailer
+    ? '<div class="notice notice-info">You are signed in as '+safe(user.email||user.phoneNumber||'your retailer account')+'. Finish submitting the application for this account.</div><input type="hidden" name="contactMethod" value="existing">'
+    : '<div class="field"><label for="partner-contact-method">Account verification method</label><select id="partner-contact-method" name="contactMethod"><option value="email" '+(d.contactMethod!=='phone'?'selected':'')+'>Email + password</option><option value="phone" '+(d.contactMethod==='phone'?'selected':'')+'>Phone OTP</option></select></div><div data-partner-contact="email" '+(d.contactMethod==='phone'?'hidden':'')+'>'+field('email','Email address *','type="email" autocomplete="email" maxlength="254" required '+(user?'readonly':''))+field('password','Create password *','type="password" autocomplete="new-password" minlength="6" maxlength="128" '+(user?'disabled':'required'))+'</div>';
+  app.innerHTML='<div class="auth-page"><div class="auth-card auth-card-wide"><div class="eyebrow">Pashughar partners</div><h1>Apply to become a partner</h1><p class="auth-description">Create your account and send one application for administrator review. Your retailer type is locked when submitted; only an administrator can change it after approval.</p><form id="partner-register-form">'+accountFields+field('contactName','Your full name *','required maxlength="100" autocomplete="name"')+(!isExistingRetailer?'<div data-partner-contact="phone" '+(d.contactMethod!=='phone'?'':'')+'>'+field('phone','Phone number *','required maxlength="40" inputmode="tel" autocomplete="tel" placeholder="+977 98XXXXXXXX"')+'<div id="partner-recaptcha-container"></div><div id="partner-otp-group" '+(partnerOtpSent?'':'hidden')+'><div class="field"><label for="partner-otp">SMS verification code *</label><input id="partner-otp" name="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" '+(partnerOtpSent?'required':'')+' placeholder="6-digit code"></div></div></div>':field('phone','Contact phone *','required maxlength="40" inputmode="tel"'))+field('storeName','Business / clinic / owner name *','required maxlength="100"')+select('retailerType','Choose one retailer type *',typeOptions)+field('location','Location / municipality / district *','required maxlength="220" autocomplete="street-address"')+textarea('description','Business description','maxlength="700" rows="3" placeholder="Describe your business, animals or services"')+
+    '<div data-partner-type="vet" '+(d.retailerType==='vet'?'':'hidden')+'><h3 class="form-section-title">Veterinary professional details</h3>'+field('degree','Degree / qualification *','required maxlength="100" placeholder="e.g. BVSc & AH"')+field('university','University *','required maxlength="180"')+field('graduationYear','Graduation year *','required type="number" min="1950" max="'+new Date().getFullYear()+'"')+field('councilRegistrationNumber','Veterinary council registration number *','required maxlength="120"')+'<div class="field"><label for="partner-certificate">Qualification certificate * (PDF/JPG/PNG/WebP, max 10 MB)</label><input id="partner-certificate" name="certificateFile" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" required></div>'+textarea('workExperience','Work experience *','required maxlength="1000" rows="3"')+textarea('clinicLocations','Clinic locations * (one per line)','required maxlength="1000" rows="3"')+textarea('services','Services offered * (one per line)','required maxlength="1000" rows="3"')+field('fees','Consultation / service fees *','required maxlength="500"')+textarea('availability','Availability *','required maxlength="700" rows="3" placeholder="Days, hours, emergency arrangements"')+'</div>'+
+    '<div data-partner-type="pet_breeding" '+(d.retailerType==='pet_breeding'?'':'hidden')+'><h3 class="form-section-title">Pet breeding owner details</h3>'+textarea('ownerInfo','Owner information *','required maxlength="500" rows="2"')+textarea('animalsNote','Initial animals / breeds and health records','maxlength="700" rows="3" placeholder="You can add each animal as a listing after approval.")+'</div>'+
+    '<div class="notice notice-info"><strong>After submission:</strong> Your application is pending. You cannot create listings, sell, or accept bookings until approved.</div><button class="button button-primary button-wide" id="partner-submit" type="submit">'+(partnerOtpSent?'Confirm OTP and submit application':'Submit partner application →')+'</button><a class="auth-back-link" href="#home">← Back to marketplace</a></form></div></div>';
+  const typeInput=document.getElementById('partner-retailerType');
+  const syncType=()=>document.querySelectorAll('[data-partner-type]').forEach(el=>{el.hidden=el.dataset.partnerType!==typeInput?.value;});
+  typeInput?.addEventListener('change',syncType);syncType();
+  document.getElementById('partner-contact-method')?.addEventListener('change',e=>{
+    partnerOtpSent=false;
+    document.querySelectorAll('[data-partner-contact]').forEach(el=>el.hidden=el.dataset.partnerContact!==e.target.value);
+    const otp=document.getElementById('partner-otp-group');if(otp)otp.hidden=true;
+    const submit=document.getElementById('partner-submit');if(submit)submit.textContent='Submit partner application →';
+  });
+}
+async function submitPartnerRegistration(form) {
+  const fd=new FormData(form);
+  partnerApplicationDraft=Object.fromEntries(fd.entries());
+  const method=String(fd.get('contactMethod')||'existing');
+  const type=String(fd.get('retailerType')||'');
+  if(!isFirebaseConfigured())throw new Error('Firebase is required to register a real partner.');
+  if(!RETAILER_CATEGORY[type])throw new Error('Choose a valid retailer type.');
+  const user=session();
+  if(user?.role==='customer'||user?.role==='admin')throw new Error('Sign out and create a separate retailer account.');
+  if(method==='phone'&&!user?.firebase) {
+    const phone=String(fd.get('phone')||'').trim();
+    if(!partnerOtpSent) {
+      await sendPhoneOtp(phone,'retailer',true,'partner-recaptcha-container');
+      partnerOtpSent=true;
+      const otp=document.getElementById('partner-otp-group');if(otp){otp.hidden=false;otp.querySelector('input')?.setAttribute('required','');}
+      const button=document.getElementById('partner-submit');if(button)button.textContent='Confirm OTP and submit application →';
+      showToast('Phone verification code sent. Enter the code to finish the application.');return;
+    }
+    await confirmPhoneOtp(String(fd.get('otp')||''),'retailer');
+  } else if(!user?.firebase) {
+    const email=String(fd.get('email')||'').trim(),password=String(fd.get('password')||'');
+    if(!email||password.length<6)throw new Error('Enter a valid email address and password of at least 6 characters.');
+    await createEmailAccount(email,password,'retailer',true);
+  }
+  let certificateUrl='';
+  const certificate=fd.get('certificateFile');
+  if(type==='vet') {
+    if(certificate instanceof File && certificate.size>0) certificateUrl=await uploadRetailerFile(certificate,'certificate');
+    else throw new Error('Upload the veterinary qualification certificate before submitting.');
+  }
+  const payload={
+    retailerType:type,storeName:String(fd.get('storeName')||'').trim(),
+    contactName:String(fd.get('contactName')||'').trim(),phone:String(fd.get('phone')||user?.phoneNumber||'').trim(),
+    email:String(fd.get('email')||user?.email||'').trim(),location:String(fd.get('location')||'').trim(),
+    description:String(fd.get('description')||'').trim(),degree:String(fd.get('degree')||''),university:String(fd.get('university')||''),
+    graduationYear:fd.get('graduationYear'),councilRegistrationNumber:String(fd.get('councilRegistrationNumber')||''),
+    certificateUrl,workExperience:String(fd.get('workExperience')||''),clinicLocations:String(fd.get('clinicLocations')||''),
+    services:String(fd.get('services')||''),fees:String(fd.get('fees')||''),availability:String(fd.get('availability')||''),
+    ownerInfo:String(fd.get('ownerInfo')||''),animalsNote:String(fd.get('animalsNote')||'')
+  };
+  const result=await submitRetailerApplication(payload);
+  partnerApplicationDraft={};partnerOtpSent=false;
+  if(firebaseSession)firebaseSession={...firebaseSession,role:'retailer',status:'pending',retailerType:type,name:payload.contactName,storeName:payload.storeName};
+  renderPartnerWaiting({...session(),role:'retailer',status:'pending',retailerType:type},{...payload,...result,status:'pending'});
+  showToast('Partner application submitted. You will see the retailer dashboard after approval.');
+}
+
 function renderAdminLogin() {
   renderAuthFrame({
     eyebrow: 'Restricted access', title: 'Pashughar admin',
